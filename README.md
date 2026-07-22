@@ -1,5 +1,5 @@
-![Laravel](https://img.shields.io/badge/Laravel-12-red)
-![PHP](https://img.shields.io/badge/PHP-8.3-blue)
+![Laravel](https://img.shields.io/badge/Laravel-11-red)
+![PHP](https://img.shields.io/badge/PHP-7.4-blue)
 ![MySQL](https://img.shields.io/badge/MySQL-8-orange)
 ![Bootstrap](https://img.shields.io/badge/Bootstrap-5-purple)
 ![License](https://img.shields.io/badge/License-MIT-green)
