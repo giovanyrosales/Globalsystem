@@ -1459,7 +1459,7 @@ class ReportesPresupuestoUnidadController extends Controller
         ini_set("pcre.backtrack_limit", "5000000");
         $logoalcaldia = 'images/logo.png';
 
-        $mpdf = new \Mpdf\Mpdf(['format' => 'LETTER-L']); // landscape para que quepan 7 columnas
+        $mpdf = new \Mpdf\Mpdf(['tempDir' => sys_get_temp_dir(), 'format' => 'LETTER']);
         $mpdf->SetTitle('Presupuesto Unidad');
         $mpdf->showImageErrors = false;
 
