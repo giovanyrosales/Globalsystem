@@ -7,6 +7,7 @@ use App\Models\AreaGestion;
 use App\Models\Cuenta;
 use App\Models\FuenteRecursos;
 use App\Models\LineaTrabajo;
+use App\Models\Meses;
 use App\Models\ObjEspecifico;
 use App\Models\P_AnioPresupuesto;
 use App\Models\P_Departamento;
@@ -91,7 +92,9 @@ class ConfiguracionPresupuestoUnidadController extends Controller
 
         $unidad = P_UnidadMedida::orderBy('nombre')->get();
 
-        return view('backend.admin.presupuestounidad.crear.vistacrearpresupuestounidad', compact( 'listado', 'unidad'));
+        $arrayMeses = Meses::orderBy('id', 'ASC')->get();
+
+        return view('backend.admin.presupuestounidad.crear.vistacrearpresupuestounidad', compact( 'listado', 'unidad', 'arrayMeses'));
     }
 
     // Esta vista retorna con el presupuesto nuevo. y al cargarse desactiva el modal loading de carga
@@ -157,7 +160,10 @@ class ConfiguracionPresupuestoUnidadController extends Controller
             $index++;
         }
 
-        return view('backend.admin.presupuestounidad.crear.contenedorcrearpresupuesto', compact('rubro'));
+        // Se agrega arrayMeses para el select de mes de ejecución en la tabla base
+        $arrayMeses = Meses::orderBy('id', 'ASC')->get();
+
+        return view('backend.admin.presupuestounidad.crear.contenedorcrearpresupuesto', compact('rubro', 'arrayMeses'));
     }
 
     // busca material del catálogo de materiales para unidades
@@ -196,15 +202,13 @@ class ConfiguracionPresupuestoUnidadController extends Controller
 
         $validator = Validator::make($request->all(), $rules);
 
-        if ( $validator->fails()){
+        if ($validator->fails()){
             return ['success' => 0];
         }
 
-        // obtener información del usuario, saber quien esta agregando el presupuesto
         $idusuario = Auth::id();
-        $infoDepa = P_UsuarioDepartamento::where('id_usuario', $idusuario)->first();
+        $infoDepa  = P_UsuarioDepartamento::where('id_usuario', $idusuario)->first();
 
-        // verificar que a un no exista el presupuesto
         if(P_PresupUnidad::where('id_anio', $request->anio)
             ->where('id_departamento', $infoDepa->id_departamento)
             ->first()){
@@ -216,57 +220,65 @@ class ConfiguracionPresupuestoUnidadController extends Controller
         try {
 
             $pr = new P_PresupUnidad();
-            $pr->id_anio = $request->anio;
+            $pr->id_anio         = $request->anio;
             $pr->id_departamento = $infoDepa->id_departamento;
-            $pr->id_estado = 1; // editable
-            $pr->saldo_aprobado = 0; // cuando Presupuesto cree cuenta unidad esto se va a Setear.
+            $pr->id_estado       = 1;
+            $pr->saldo_aprobado  = 0;
             $pr->save();
 
+            // MATERIALES DEL PRESUPUESTO BASE
+            // mesbase[] viene paralelo a idmaterial[], unidades[], periodo[]
             if($request->idmaterial != null) {
                 for ($i = 0; $i < count($request->idmaterial); $i++) {
 
                     $infoMaterial = P_Materiales::where('id', $request->idmaterial[$i])->first();
 
-                    $prDetalle = new P_PresupUnidadDetalle();
+                    $prDetalle                  = new P_PresupUnidadDetalle();
                     $prDetalle->id_presup_unidad = $pr->id;
-                    $prDetalle->id_material = $request->idmaterial[$i];
-                    $prDetalle->cantidad = $request->unidades[$i];
-                    $prDetalle->precio = $infoMaterial->costo;
-                    $prDetalle->periodo = $request->periodo[$i];
+                    $prDetalle->id_material      = $request->idmaterial[$i];
+                    $prDetalle->cantidad         = $request->unidades[$i];
+                    $prDetalle->precio           = $infoMaterial->costo;
+                    $prDetalle->periodo          = $request->periodo[$i];
+                    $prDetalle->id_mes           = $request->mesbase[$i]; // <-- mes base
                     $prDetalle->save();
                 }
             }
 
-            // INGRESO DE MATERIALES EXTRA
+            // NUEVOS MATERIALES SOLICITADOS
+            // mesextrafila[] viene paralelo a descripcionfila[], costoextrafila[], etc.
             if($request->descripcionfila != null) {
                 for ($j = 0; $j < count($request->descripcionfila); $j++) {
 
-                    $mtrDetalle = new P_MaterialesDetalle();
+                    $mtrDetalle                  = new P_MaterialesDetalle();
                     $mtrDetalle->id_presup_unidad = $pr->id;
-                    $mtrDetalle->id_unidadmedida = $request->unidadmedida[$j];
-                    $mtrDetalle->descripcion = $request->descripcionfila[$j];
-                    $mtrDetalle->costo = $request->costoextrafila[$j];
-                    $mtrDetalle->cantidad = $request->cantidadextrafila[$j];
-                    $mtrDetalle->periodo = $request->periodoextrafila[$j];
+                    $mtrDetalle->id_unidadmedida  = $request->unidadmedida[$j];
+                    $mtrDetalle->descripcion      = $request->descripcionfila[$j];
+                    $mtrDetalle->costo            = $request->costoextrafila[$j];
+                    $mtrDetalle->cantidad         = $request->cantidadextrafila[$j];
+                    $mtrDetalle->periodo          = $request->periodoextrafila[$j];
+                    $mtrDetalle->id_mes           = $request->mesextrafila[$j]; // <-- mes material nuevo
                     $mtrDetalle->save();
                 }
             }
 
-            // INGRESO DE PROYECTOS EXTRA
+            // NUEVOS PROYECTOS SOLICITADOS
+            // mesfilaproyecto[] viene paralelo a descripcionfilaproyecto[], costoextrafilaproyecto[]
             if($request->descripcionfilaproyecto != null) {
                 for ($jp = 0; $jp < count($request->descripcionfilaproyecto); $jp++) {
 
-                    $prdDetalle = new P_ProyectosPendientes();
+                    $prdDetalle                  = new P_ProyectosPendientes();
                     $prdDetalle->id_presup_unidad = $pr->id;
-                    $prdDetalle->descripcion = $request->descripcionfilaproyecto[$jp];
-                    $prdDetalle->costo = $request->costoextrafilaproyecto[$jp];
+                    $prdDetalle->descripcion      = $request->descripcionfilaproyecto[$jp];
+                    $prdDetalle->costo            = $request->costoextrafilaproyecto[$jp];
+                    $prdDetalle->id_mes           = $request->mesfilaproyecto[$jp]; // <-- mes proyecto
                     $prdDetalle->save();
                 }
             }
 
             DB::commit();
             return ['success' => 2];
-        }catch(\Throwable $e){
+
+        } catch(\Throwable $e){
             DB::rollback();
             Log::info('ee' . $e);
             return ['success' => 99];
@@ -309,26 +321,20 @@ class ConfiguracionPresupuestoUnidadController extends Controller
 
     // retorna contenedor para editar un presupuesto
     public function contenedorEditarPresupuestoUnidad($idAnio){
-        // recibimos id año
 
         $idusuario = Auth::id();
 
-        // si este id de usuario no esta registrado con departamento. mostrar alerta
         if(!P_UsuarioDepartamento::where('id_usuario', $idusuario)->first()){
             return view('backend.admin.presupuestounidad.crear.vistadepartamentonoasignado');
         }
 
         $infoDepa = P_UsuarioDepartamento::where('id_usuario', $idusuario)->first();
 
-        // siempre habra un registro
         $infoPresupUnidad = P_PresupUnidad::where('id_departamento', $infoDepa->id_departamento)
             ->where('id_anio', $idAnio)->first();
 
-
         $pilaArrayMaterialVisib = array();
 
-        // estos materiales de mi presupuesto, pudieron haber sido ocultados, siempre
-        // quiero que se muestren
         $arrayPresUniDetalle = P_PresupUnidadDetalle::where('id_presup_unidad', $infoPresupUnidad->id)->get();
 
         foreach ($arrayPresUniDetalle as $p){
@@ -336,67 +342,57 @@ class ConfiguracionPresupuestoUnidadController extends Controller
         }
 
         $idpresupuesto = $infoPresupUnidad->id;
-        $estado = $infoPresupUnidad->id_estado;
-        $preanio = P_AnioPresupuesto::where('id', $idAnio)->pluck('nombre')->first();
-
+        $estado        = $infoPresupUnidad->id_estado;
+        $preanio       = P_AnioPresupuesto::where('id', $idAnio)->pluck('nombre')->first();
 
         $unidad = P_UnidadMedida::orderBy('nombre')->get();
-        $rubro = Rubro::orderBy('codigo')->get();
+        $rubro  = Rubro::orderBy('codigo')->get();
 
-        $resultsBloque = array();
-        $index = 0;
-        $resultsBloque2 = array();
-        $index2 = 0;
-        $resultsBloque3 = array();
-        $index3 = 0;
+        $resultsBloque  = array(); $index  = 0;
+        $resultsBloque2 = array(); $index2 = 0;
+        $resultsBloque3 = array(); $index3 = 0;
 
         $totalvalor = 0;
 
-        // LISTADO DE PROYECTO APROBADOS
+        // LISTADO DE PROYECTOS APROBADOS
         $listadoProyectoAprobados = P_ProyectosAprobados::where('id_presup_unidad', $idpresupuesto)
             ->orderBy('descripcion', 'ASC')
             ->get();
 
         foreach ($listadoProyectoAprobados as $dd){
-
-            $infoObjeto = ObjEspecifico::where('id', $dd->id_objespeci)->first();
+            $infoObjeto  = ObjEspecifico::where('id', $dd->id_objespeci)->first();
             $infoFuenteR = ObjEspecifico::where('id', $dd->id_fuenter)->first();
-            $infoLinea = ObjEspecifico::where('id', $dd->id_lineatrabajo)->first();
-            $infoArea = ObjEspecifico::where('id', $dd->id_areagestion)->first();
+            $infoLinea   = ObjEspecifico::where('id', $dd->id_lineatrabajo)->first();
+            $infoArea    = ObjEspecifico::where('id', $dd->id_areagestion)->first();
 
-            $dd->codigoobj = $infoObjeto->codigo;
-            $dd->objeto = $infoObjeto->codigo . " - " . $infoObjeto->nombre;
-            $dd->fuenterecurso = $infoFuenteR->codigo . " - " . $infoFuenteR->nombre;
-            $dd->lineatrabajo = $infoLinea->codigo . " - " . $infoLinea->nombre;
-            $dd->areagestion = $infoArea->codigo . " - " . $infoArea->nombre;
-
-            $dd->costoFormat = '$' . number_format((float)$dd->costo, 2, '.', ',');
+            $dd->codigoobj    = $infoObjeto->codigo;
+            $dd->objeto       = $infoObjeto->codigo   . " - " . $infoObjeto->nombre;
+            $dd->fuenterecurso = $infoFuenteR->codigo  . " - " . $infoFuenteR->nombre;
+            $dd->lineatrabajo = $infoLinea->codigo     . " - " . $infoLinea->nombre;
+            $dd->areagestion  = $infoArea->codigo      . " - " . $infoArea->nombre;
+            $dd->costoFormat  = '$' . number_format((float)$dd->costo, 2, '.', ',');
         }
 
-
+        // RUBROS / CUENTAS / OBJETOS / MATERIALES
         foreach($rubro as $secciones){
-            array_push($resultsBloque,$secciones);
+            array_push($resultsBloque, $secciones);
 
-            $sumaRubro = 0;
+            $sumaRubro    = 0;
 
             $subSecciones = Cuenta::where('id_rubro', $secciones->id)
                 ->orderBy('codigo', 'ASC')
                 ->get();
 
-            // agregar objetos
             foreach ($subSecciones as $lista){
-
                 array_push($resultsBloque2, $lista);
 
-                $subSecciones2 = ObjEspecifico::where('id_cuenta', $lista->id)
+                $subSecciones2  = ObjEspecifico::where('id_cuenta', $lista->id)
                     ->orderBy('codigo', 'ASC')
                     ->get();
 
                 $sumaObjetoTotal = 0;
 
-                // agregar materiales
                 foreach ($subSecciones2 as $ll){
-
                     array_push($resultsBloque3, $ll);
 
                     if($ll->codigo == 61109){
@@ -404,7 +400,7 @@ class ConfiguracionPresupuestoUnidadController extends Controller
                     }
 
                     $subSecciones3 = P_Materiales::where('id_objespecifico', $ll->id)
-                        ->where('visible', 1) // solo materiales visibles
+                        ->where('visible', 1)
                         ->orderBy('descripcion', 'ASC')
                         ->get();
 
@@ -412,82 +408,116 @@ class ConfiguracionPresupuestoUnidadController extends Controller
 
                     foreach ($subSecciones3 as $subLista){
 
-                        $uni = P_UnidadMedida::where('id', $subLista->id_unidadmedida)->first();
-                        $unimedida = $uni->nombre;
+                        $uni             = P_UnidadMedida::where('id', $subLista->id_unidadmedida)->first();
+                        $subLista->unimedida = $uni->nombre;
 
-                        $subLista->unimedida = $unimedida;
-
-                        // ingresar los datos a editar
+                        // Cargar datos guardados del detalle
                         if($data = P_PresupUnidadDetalle::where('id_presup_unidad', $infoPresupUnidad->id)
                             ->where('id_material', $subLista->id)->first()){
 
-                            $subLista->precio = $data->precio;
-
+                            $subLista->precio   = $data->precio;
                             $subLista->cantidad = $data->cantidad;
-                            $subLista->periodo = $data->periodo;
+                            $subLista->periodo  = $data->periodo;
+                            $subLista->id_mes   = $data->id_mes;   // <-- mes guardado para preseleccionar select
+
                             $total = ($data->precio * $data->cantidad) * $data->periodo;
                             $subLista->total = '$' . number_format((float)$total, 2, '.', ',');
 
                             $sumaObjeto = $sumaObjeto + $total;
+
                         }else{
                             $subLista->cantidad = '';
-                            $subLista->periodo = '';
-                            $subLista->total = '';
-                            $subLista->precio = $subLista->costo;
+                            $subLista->periodo  = '';
+                            $subLista->total    = '';
+                            $subLista->precio   = $subLista->costo;
+                            $subLista->id_mes   = null;
                         }
-
                     }
 
+                    // Sumar proyectos aprobados al objeto
                     foreach ($listadoProyectoAprobados as $lpa){
                         if($ll->codigo == $lpa->codigoobj){
                             $sumaObjeto += $lpa->costo;
                         }
                     }
 
-
                     $sumaObjetoTotal = $sumaObjetoTotal + $sumaObjeto;
-                    $ll->sumaobjeto = number_format((float)$sumaObjeto, 2, '.', ',');
+                    $ll->sumaobjeto  = number_format((float)$sumaObjeto, 2, '.', ',');
 
                     $resultsBloque3[$index3]->material = $subSecciones3;
                     $index3++;
                 }
 
-                $sumaRubro = $sumaRubro + $sumaObjetoTotal;
-                $lista->sumaobjetototal = number_format((float)$sumaObjetoTotal, 2, '.', ',');
+                $sumaRubro               = $sumaRubro + $sumaObjetoTotal;
+                $lista->sumaobjetototal  = number_format((float)$sumaObjetoTotal, 2, '.', ',');
 
                 $resultsBloque2[$index2]->objeto = $subSecciones2;
                 $index2++;
             }
 
-            $totalvalor = $totalvalor + $sumaRubro;
+            $totalvalor          = $totalvalor + $sumaRubro;
             $secciones->sumarubro = number_format((float)$sumaRubro, 2, '.', ',');
 
             $resultsBloque[$index]->cuenta = $subSecciones;
             $index++;
         }
 
-
         $totalvalor = number_format((float)$totalvalor, 2, '.', ',');
 
-        // LISTADO DE MATERIALES
+        // LISTADO DE NUEVOS MATERIALES (P_MaterialesDetalle) con nombreMes
         $listado = P_MaterialesDetalle::where('id_presup_unidad', $infoPresupUnidad->id)
             ->orderBy('descripcion', 'ASC')
             ->get();
 
         foreach ($listado as $dd){
-            $infoMedida = P_UnidadMedida::where('id', $dd->id_unidadmedida)->first();
+            $infoMedida       = P_UnidadMedida::where('id', $dd->id_unidadmedida)->first();
             $dd->unidadmedida = $infoMedida->nombre;
+
+            // Nombre del mes guardado para mostrar en la fila
+            if($dd->id_mes){
+                $infoMes       = Meses::where('id', $dd->id_mes)->first();
+                $dd->nombreMes = $infoMes ? $infoMes->nombre : '';
+            }else{
+                $dd->nombreMes = '';
+            }
         }
 
-        // LISTADO DE PROYECTO
+        // LISTADO DE PROYECTOS PENDIENTES con nombreMes
         $listadoProyecto = P_ProyectosPendientes::where('id_presup_unidad', $infoPresupUnidad->id)
             ->orderBy('descripcion', 'ASC')
             ->get();
 
+        foreach ($listadoProyecto as $lp){
+            if($lp->id_mes){
+                $infoMesP      = Meses::where('id', $lp->id_mes)->first();
+                $lp->nombreMes = $infoMesP ? $infoMesP->nombre : '';
+            }else{
+                $lp->nombreMes = '';
+            }
+        }
 
-        return view('backend.admin.presupuestounidad.editar.contenedoreditarpresupuesto', compact( 'estado', 'totalvalor',
-            'listado', 'idAnio', 'idpresupuesto', 'preanio', 'unidad', 'rubro', 'listadoProyecto', 'listadoProyectoAprobados'));
+        // Meses para selects
+        $arrayMeses = Meses::orderBy('id', 'ASC')->get();
+
+        return view('backend.admin.presupuestounidad.editar.contenedoreditarpresupuesto', compact(
+            'estado',
+            'totalvalor',
+            'listado',
+            'idAnio',
+            'idpresupuesto',
+            'preanio',
+            'unidad',
+            'rubro',
+            'listadoProyecto',
+            'listadoProyectoAprobados',
+            'arrayMeses'
+        ));
     }
+
+
+
+
+
 
     // petición para editar un presupuesto si no esta en revisión o aprobado
     public function editarPresupuestoUnidad(Request $request){
@@ -498,7 +528,7 @@ class ConfiguracionPresupuestoUnidadController extends Controller
 
         $validator = Validator::make($request->all(), $rules);
 
-        if ( $validator->fails()){
+        if ($validator->fails()){
             return ['success' => 0];
         }
 
@@ -506,75 +536,73 @@ class ConfiguracionPresupuestoUnidadController extends Controller
 
         try {
 
-        $infoPresu = P_PresupUnidad::where('id', $request->idpresupuesto)->first();
+            $infoPresu = P_PresupUnidad::where('id', $request->idpresupuesto)->first();
 
-        if($infoPresu->id_estado == 2){
-            // presupuesto esta en revisión
-            return ['success' => 1];
-        }
+            if($infoPresu->id_estado == 2){
+                return ['success' => 1]; // en revisión
+            }
 
-        if($infoPresu->id_estado == 3){
-            // presupuesto esta aprobado
-            return ['success' => 2];
-        }
+            if($infoPresu->id_estado == 3){
+                return ['success' => 2]; // aprobado
+            }
 
-            // borrar todos el presupuesto base
+            // Borrar todo para reescribir
             P_PresupUnidadDetalle::where('id_presup_unidad', $request->idpresupuesto)->delete();
-
-            // borrar materiales extra
             P_MaterialesDetalle::where('id_presup_unidad', $request->idpresupuesto)->delete();
-
-            // borrar solicitud de proyectos
             P_ProyectosPendientes::where('id_presup_unidad', $request->idpresupuesto)->delete();
 
-
-            if($request->unidades != null) {
-                // crear de nuevo presupuesto base
-                for ($i = 0; $i < count($request->unidades); $i++) {
+            // PRESUPUESTO BASE
+            // mesbase[] viene paralelo a idmaterial[], unidades[], periodo[]
+            if($request->idmaterial != null) {
+                for ($i = 0; $i < count($request->idmaterial); $i++) {
 
                     $infoMaterial = P_Materiales::where('id', $request->idmaterial[$i])->first();
 
-                    $prDetalle = new P_PresupUnidadDetalle();
+                    $prDetalle                   = new P_PresupUnidadDetalle();
                     $prDetalle->id_presup_unidad = $request->idpresupuesto;
-                    $prDetalle->id_material = $request->idmaterial[$i];
-                    $prDetalle->cantidad = $request->unidades[$i];
-                    $prDetalle->precio = $infoMaterial->costo;
-                    $prDetalle->periodo = $request->periodo[$i];
+                    $prDetalle->id_material      = $request->idmaterial[$i];
+                    $prDetalle->cantidad         = $request->unidades[$i];
+                    $prDetalle->precio           = $infoMaterial->costo;
+                    $prDetalle->periodo          = $request->periodo[$i];
+                    $prDetalle->id_mes           = $request->mesbase[$i]; // <-- mes base
                     $prDetalle->save();
                 }
             }
 
-            // INGRESO DE MATERIALES EXTRA
-
+            // NUEVOS MATERIALES SOLICITADOS
+            // mesextrafila[] viene paralelo a descripcionfila[], costoextrafila[], etc.
             if($request->descripcionfila != null) {
                 for ($j = 0; $j < count($request->descripcionfila); $j++) {
 
-                    $mtrDetalle = new P_MaterialesDetalle();
+                    $mtrDetalle                   = new P_MaterialesDetalle();
                     $mtrDetalle->id_presup_unidad = $request->idpresupuesto;
-                    $mtrDetalle->id_unidadmedida = $request->unidadmedida[$j];
-                    $mtrDetalle->descripcion = $request->descripcionfila[$j];
-                    $mtrDetalle->costo = $request->costoextrafila[$j];
-                    $mtrDetalle->cantidad = $request->cantidadextrafila[$j];
-                    $mtrDetalle->periodo = $request->periodoextrafila[$j];
+                    $mtrDetalle->id_unidadmedida  = $request->unidadmedida[$j];
+                    $mtrDetalle->descripcion      = $request->descripcionfila[$j];
+                    $mtrDetalle->costo            = $request->costoextrafila[$j];
+                    $mtrDetalle->cantidad         = $request->cantidadextrafila[$j];
+                    $mtrDetalle->periodo          = $request->periodoextrafila[$j];
+                    $mtrDetalle->id_mes           = $request->mesextrafila[$j]; // <-- mes material nuevo
                     $mtrDetalle->save();
                 }
             }
 
-            // INGRESO DE SOLICITUD DE PROYECTOS
+            // PROYECTOS SOLICITADOS
+            // mesfilaproyecto[] viene paralelo a descripcionfilaproyecto[], costoextrafilaproyecto[]
             if($request->descripcionfilaproyecto != null) {
                 for ($jp = 0; $jp < count($request->descripcionfilaproyecto); $jp++) {
 
-                    $prdDetalle = new P_ProyectosPendientes();
+                    $prdDetalle                   = new P_ProyectosPendientes();
                     $prdDetalle->id_presup_unidad = $request->idpresupuesto;
-                    $prdDetalle->descripcion = $request->descripcionfilaproyecto[$jp];
-                    $prdDetalle->costo = $request->costoextrafilaproyecto[$jp];
+                    $prdDetalle->descripcion      = $request->descripcionfilaproyecto[$jp];
+                    $prdDetalle->costo            = $request->costoextrafilaproyecto[$jp];
+                    $prdDetalle->id_mes           = $request->mesfilaproyecto[$jp]; // <-- mes proyecto
                     $prdDetalle->save();
                 }
             }
 
             DB::commit();
-
             return ['success' => 3];
+
         }catch(\Throwable $e){
             Log::info('err ' . $e);
             DB::rollback();
@@ -604,8 +632,10 @@ class ConfiguracionPresupuestoUnidadController extends Controller
             $arrayLinea = LineaTrabajo::orderBy('nombre', 'ASC')->get();
             $arrayGestion = AreaGestion::orderBy('nombre', 'ASC')->get();
 
+            $arrayMeses = Meses::orderBy('id', 'ASC')->get();
+
             return view('backend.admin.presupuestounidad.revisar.presupuestoindividual', compact( 'iddepa', 'idpre','arrayestado',
-                'idanio', 'infoAnio', 'estado', 'arrayObjeto', 'arrayFuente', 'arrayLinea', 'arrayGestion'));
+                'idanio', 'infoAnio', 'estado', 'arrayObjeto', 'arrayFuente', 'arrayLinea', 'arrayGestion', 'arrayMeses'));
         }else{
             // presupuesto no encontrado
             return view('backend.admin.presupuestounidad.revisar.vistapresupuestonoencontrado');
@@ -614,26 +644,22 @@ class ConfiguracionPresupuestoUnidadController extends Controller
 
     // retorna contenedor de presupuesto para revisión
     public function contenedorPresupuestoIndividual($iddepa, $idanio){
-        // id anio y departamento
 
         $presupuesto = P_PresupUnidad::where('id_anio', $idanio)
             ->where('id_departamento', $iddepa)
             ->first();
 
-        $estado = P_Estado::orderBy('id', 'ASC')->get();
+        $estado  = P_Estado::orderBy('id', 'ASC')->get();
         $preanio = P_AnioPresupuesto::where('id', $idanio)->pluck('nombre')->first();
 
         $idestado = $presupuesto->id_estado;
 
-        $rubro = Rubro::orderBy('codigo', 'ASC')->get();
+        $rubro  = Rubro::orderBy('codigo', 'ASC')->get();
         $objeto = ObjEspecifico::orderBy('codigo', 'ASC')->get();
 
-        $resultsBloque = array();
-        $index = 0;
-        $resultsBloque2 = array();
-        $index2 = 0;
-        $resultsBloque3 = array();
-        $index3 = 0;
+        $resultsBloque  = array(); $index  = 0;
+        $resultsBloque2 = array(); $index2 = 0;
+        $resultsBloque3 = array(); $index3 = 0;
 
         $totalvalor = 0;
 
@@ -641,76 +667,66 @@ class ConfiguracionPresupuestoUnidadController extends Controller
             ->where('id_anio', $idanio)->get();
 
         $pila = array();
-
         foreach ($listadoPresupuesto as $lp){
             array_push($pila, $lp->id);
         }
 
         $pilaArrayMaterialUnicos = array();
 
-        // unicos materiales, para no mostrar la gran lista
         $arrayPresUniDetalle = P_PresupUnidadDetalle::where('id_presup_unidad', $presupuesto->id)->get();
-
         foreach ($arrayPresUniDetalle as $p){
             array_push($pilaArrayMaterialUnicos, $p->id_material);
         }
 
         $idpresupuesto = $presupuesto->id;
 
-        // LISTADO DE PROYECTO APROBADOS
+        // PROYECTOS APROBADOS
         $listadoProyectoAprobados = P_ProyectosAprobados::where('id_presup_unidad', $idpresupuesto)
             ->orderBy('descripcion', 'ASC')
             ->get();
 
         foreach ($listadoProyectoAprobados as $dd){
-
-            $infoObjeto = ObjEspecifico::where('id', $dd->id_objespeci)->first();
+            $infoObjeto  = ObjEspecifico::where('id', $dd->id_objespeci)->first();
             $infoFuenteR = FuenteRecursos::where('id', $dd->id_fuenter)->first();
-            $infoLinea = LineaTrabajo::where('id', $dd->id_lineatrabajo)->first();
-            $infoArea = AreaGestion::where('id', $dd->id_areagestion)->first();
+            $infoLinea   = LineaTrabajo::where('id', $dd->id_lineatrabajo)->first();
+            $infoArea    = AreaGestion::where('id', $dd->id_areagestion)->first();
 
-            $dd->codigoobj = $infoObjeto->codigo;
-            $dd->objeto = $infoObjeto->codigo . " - " . $infoObjeto->nombre;
+            $dd->codigoobj    = $infoObjeto->codigo;
+            $dd->objeto       = $infoObjeto->codigo . " - " . $infoObjeto->nombre;
             $dd->fuenterecurso = $infoFuenteR->codigo . " - " . $infoFuenteR->nombre;
             $dd->lineatrabajo = $infoLinea->codigo . " - " . $infoLinea->nombre;
-            $dd->areagestion = $infoArea->codigo . " - " . $infoArea->nombre;
-
-            $dd->costoFormat = '$' . number_format((float)$dd->costo, 2, '.', ',');
+            $dd->areagestion  = $infoArea->codigo . " - " . $infoArea->nombre;
+            $dd->costoFormat  = '$' . number_format((float)$dd->costo, 2, '.', ',');
         }
 
-        // agregar cuentas
+        // RUBROS / CUENTAS / OBJETOS / MATERIALES
         foreach($rubro as $secciones){
-            array_push($resultsBloque,$secciones);
+            array_push($resultsBloque, $secciones);
 
-            $sumaRubro = 0;
+            $sumaRubro    = 0;
 
             $subSecciones = Cuenta::where('id_rubro', $secciones->id)
                 ->orderBy('codigo', 'ASC')
                 ->get();
 
-            // agregar objetos
             foreach ($subSecciones as $lista){
-
                 array_push($resultsBloque2, $lista);
 
-                $subSecciones2 = ObjEspecifico::where('id_cuenta', $lista->id)
+                $subSecciones2   = ObjEspecifico::where('id_cuenta', $lista->id)
                     ->orderBy('codigo', 'ASC')
                     ->get();
 
                 $sumaObjetoTotal = 0;
 
-                // agregar materiales
                 foreach ($subSecciones2 as $ll){
-
                     array_push($resultsBloque3, $ll);
-
 
                     if($ll->codigo == 61109){
                         $ll->nombre = $ll->nombre . " ( ACTIVOS FIJOS MENORES A $600.00 )";
                     }
 
                     $subSecciones3 = P_Materiales::where('id_objespecifico', $ll->id)
-                        ->whereIn('id', $pilaArrayMaterialUnicos) // solo materiales que tienen en presupuesto
+                        ->whereIn('id', $pilaArrayMaterialUnicos)
                         ->orderBy('descripcion', 'ASC')
                         ->get();
 
@@ -721,24 +737,31 @@ class ConfiguracionPresupuestoUnidadController extends Controller
                         $uni = P_UnidadMedida::where('id', $subLista->id_unidadmedida)->first();
                         $subLista->unimedida = $uni->nombre;
 
-                        // ingresar los datos a editar
                         if($data = P_PresupUnidadDetalle::where('id_presup_unidad', $presupuesto->id)
                             ->where('id_material', $subLista->id)->first()){
 
                             $subLista->cantidad = $data->cantidad;
-                            $subLista->periodo = $data->periodo;
+                            $subLista->periodo  = $data->periodo;
+                            $subLista->precio   = $data->precio;
 
-                            // periodo siempre sera mínimo 1
-                            $total = ($data->precio * $data->cantidad) * $data->periodo;
+                            // <-- nombreMes para Tab 1
+                            if($data->id_mes){
+                                $infoMes             = Meses::where('id', $data->id_mes)->first();
+                                $subLista->nombreMes = $infoMes ? $infoMes->nombre : '';
+                            }else{
+                                $subLista->nombreMes = '';
+                            }
+
+                            $total           = ($data->precio * $data->cantidad) * $data->periodo;
                             $subLista->total = number_format((float)$total, 2, '.', ',');
+                            $sumaObjeto      = $sumaObjeto + $total;
 
-                            $subLista->precio = $data->precio;
-                            $sumaObjeto = $sumaObjeto + $total;
                         }else{
-                            $subLista->cantidad = '';
-                            $subLista->periodo = '';
-                            $subLista->total = '';
-                            $subLista->precio = $subLista->costo;
+                            $subLista->cantidad  = '';
+                            $subLista->periodo   = '';
+                            $subLista->total     = '';
+                            $subLista->precio    = $subLista->costo;
+                            $subLista->nombreMes = '';
                         }
                     }
 
@@ -748,60 +771,83 @@ class ConfiguracionPresupuestoUnidadController extends Controller
                         }
                     }
 
-                    $sumaObjetoTotal = $sumaObjetoTotal + $sumaObjeto;
-                    $ll->sumaobjeto = number_format((float)$sumaObjeto, 2, '.', ',');
-
+                    $sumaObjetoTotal          = $sumaObjetoTotal + $sumaObjeto;
+                    $ll->sumaobjeto           = number_format((float)$sumaObjeto, 2, '.', ',');
                     $resultsBloque3[$index3]->material = $subSecciones3;
                     $index3++;
                 }
 
-                $sumaRubro = $sumaRubro + $sumaObjetoTotal;
-                $lista->sumaobjetototal = number_format((float)$sumaObjetoTotal, 2, '.', ',');
-
+                $sumaRubro                    = $sumaRubro + $sumaObjetoTotal;
+                $lista->sumaobjetototal       = number_format((float)$sumaObjetoTotal, 2, '.', ',');
                 $resultsBloque2[$index2]->objeto = $subSecciones2;
                 $index2++;
             }
-            $totalvalor = $totalvalor + $sumaRubro;
-            $secciones->sumarubro = number_format((float)$sumaRubro, 2, '.', ',');
 
+            $totalvalor               = $totalvalor + $sumaRubro;
+            $secciones->sumarubro     = number_format((float)$sumaRubro, 2, '.', ',');
             $resultsBloque[$index]->cuenta = $subSecciones;
             $index++;
         }
 
-        // obtener listado de materiales extra
+        // NUEVOS MATERIALES con nombreMes
         $listado = P_MaterialesDetalle::where('id_presup_unidad', $presupuesto->id)->get();
 
         foreach ($listado as $lista){
-            $uni = P_UnidadMedida::where('id', $lista->id_unidadmedida)->first();
+            $uni          = P_UnidadMedida::where('id', $lista->id_unidadmedida)->first();
             $lista->simbolo = $uni->nombre;
-        }
 
+            // <-- nombreMes para Tab 2
+            if($lista->id_mes){
+                $infoMesL       = Meses::where('id', $lista->id_mes)->first();
+                $lista->nombreMes = $infoMesL ? $infoMesL->nombre : '';
+            }else{
+                $lista->nombreMes = '';
+            }
+        }
 
         $totalvalor = number_format((float)$totalvalor, 2, '.', ',');
 
-
-        // LISTADO DE PROYECTO PENDIENTE
+        // PROYECTOS PENDIENTES con nombreMes
         $listadoProyecto = P_ProyectosPendientes::where('id_presup_unidad', $idpresupuesto)
             ->orderBy('descripcion', 'ASC')
             ->get();
 
-        return view('backend.admin.presupuestounidad.revisar.contenedorpresupuestoindividual', compact( 'estado',
-            'idpresupuesto', 'idestado', 'totalvalor',
-            'objeto', 'listado', 'preanio', 'rubro', 'listadoProyecto', 'listadoProyectoAprobados'));
+        foreach ($listadoProyecto as $lp){
+            // <-- nombreMes para Tab 3
+            if($lp->id_mes){
+                $infoMesP      = Meses::where('id', $lp->id_mes)->first();
+                $lp->nombreMes = $infoMesP ? $infoMesP->nombre : '';
+            }else{
+                $lp->nombreMes = '';
+            }
+        }
+
+        return view('backend.admin.presupuestounidad.revisar.contenedorpresupuestoindividual', compact(
+            'estado',
+            'idpresupuesto',
+            'idestado',
+            'totalvalor',
+            'objeto',
+            'listado',
+            'preanio',
+            'rubro',
+            'listadoProyecto',
+            'listadoProyectoAprobados'
+        ));
     }
 
     // petición para transferir material solicitado por una unidad y agregar a base de materiales
     public function transferirNuevoMaterial(Request $request){
 
         $regla = array(
-            'idpresupuesto' => 'required',
-            'idobj' => 'required',
+            'idpresupuesto'   => 'required',
+            'idobj'           => 'required',
             'idborrarmaterial' => 'required'
         );
 
         $validar = Validator::make($request->all(), $regla);
 
-        if ($validar->fails()){ return ['success' => 0];}
+        if ($validar->fails()){ return ['success' => 0]; }
 
         DB::beginTransaction();
 
@@ -810,32 +856,36 @@ class ConfiguracionPresupuestoUnidadController extends Controller
             $infoPresupuesto = P_PresupUnidad::where('id', $request->idpresupuesto)->first();
 
             if($infoPresupuesto->id_estado == 3){
-                // si esta aprobado no se puede agregar
                 return ['success' => 1];
             }
 
-            // agregar a materiales base
-            $base = new P_Materiales();
-            $base->descripcion = $request->descripcion;
+            // Leer el id_mes del material extra ANTES de borrarlo
+            $infoMaterialExtra = P_MaterialesDetalle::where('id', $request->idborrarmaterial)->first();
+            $idMes = $infoMaterialExtra ? $infoMaterialExtra->id_mes : null;
+
+            // Agregar a materiales base
+            $base                  = new P_Materiales();
+            $base->descripcion     = $request->descripcion;
             $base->id_unidadmedida = $request->idunidadmedida;
             $base->id_objespecifico = $request->idobj;
-            $base->costo = $request->costo;
-            $base->visible = 1; // material visible
+            $base->costo           = $request->costo;
+            $base->visible         = 1;
             $base->save();
 
-            // agregar material a la unidad detalle
-            $prDetalle = new P_PresupUnidadDetalle();
+            // Agregar material al detalle del presupuesto con el mes
+            $prDetalle                   = new P_PresupUnidadDetalle();
             $prDetalle->id_presup_unidad = $request->idpresupuesto;
-            $prDetalle->id_material = $base->id;
-            $prDetalle->cantidad = $request->cantidad;
-            $prDetalle->precio = $request->costo;
-            $prDetalle->periodo = $request->periodo;
+            $prDetalle->id_material      = $base->id;
+            $prDetalle->cantidad         = $request->cantidad;
+            $prDetalle->precio           = $request->costo;
+            $prDetalle->periodo          = $request->periodo;
+            $prDetalle->id_mes           = $idMes; // <-- mes del material extra
             $prDetalle->save();
 
-            // borrar el material extra
+            // Borrar el material extra
             P_MaterialesDetalle::where('id', $request->idborrarmaterial)->delete();
 
-             DB::commit();
+            DB::commit();
             return ['success' => 2];
 
         }catch(\Throwable $e){
@@ -1001,13 +1051,13 @@ class ConfiguracionPresupuestoUnidadController extends Controller
     public function registrarProyectoPresupuestoUnidad(Request $request){
 
         $rules = array(
-            'id' => 'required',
+            'id'          => 'required',
             'proidborrar' => 'required'
         );
 
         $validator = Validator::make($request->all(), $rules);
 
-        if ( $validator->fails()){
+        if ($validator->fails()){
             return ['success' => 0];
         }
 
@@ -1017,24 +1067,28 @@ class ConfiguracionPresupuestoUnidadController extends Controller
 
             if(P_PresupUnidad::where('id', $request->id)->first()){
 
-                // REGISTRAR
+                // Leer id_mes del proyecto pendiente ANTES de borrarlo
+                $infoPendiente = P_ProyectosPendientes::where('id', $request->proidborrar)->first();
+                $idMes = $infoPendiente ? $infoPendiente->id_mes : null;
 
-                $deta = new P_ProyectosAprobados();
+                // Registrar proyecto aprobado con el mes
+                $deta                   = new P_ProyectosAprobados();
                 $deta->id_presup_unidad = $request->id;
-                $deta->id_objespeci = $request->objeto;
-                $deta->id_fuenter = $request->fuenter;
-                $deta->id_lineatrabajo = $request->linea;
-                $deta->id_areagestion = $request->areagestion;
-                $deta->descripcion = $request->descripcion;
-                $deta->costo = $request->costo;
+                $deta->id_objespeci     = $request->objeto;
+                $deta->id_fuenter       = $request->fuenter;
+                $deta->id_lineatrabajo  = $request->linea;
+                $deta->id_areagestion   = $request->areagestion;
+                $deta->descripcion      = $request->descripcion;
+                $deta->costo            = $request->costo;
+                $deta->id_mes           = $idMes; // <-- mes del proyecto pendiente
                 $deta->save();
 
-                // borrar proyectos pendiente
-
+                // Borrar proyecto pendiente
                 P_ProyectosPendientes::where('id', $request->proidborrar)->delete();
 
                 DB::commit();
                 return ['success' => 1];
+
             }else{
                 return ['success' => 99];
             }

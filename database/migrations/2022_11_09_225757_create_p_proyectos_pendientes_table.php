@@ -16,11 +16,13 @@ class CreatePProyectosPendientesTable extends Migration
         Schema::create('p_proyectos_pendientes', function (Blueprint $table) {
             $table->id();
             $table->bigInteger('id_presup_unidad')->unsigned();
+            $table->bigInteger('id_mes')->unsigned()->nullable();
 
             $table->string('descripcion', 300);
             $table->decimal('costo', 10, 2);
 
             $table->foreign('id_presup_unidad')->references('id')->on('p_presup_unidad');
+            $table->foreign('id_mes')->references('id')->on('meses');
         });
     }
 

@@ -16,6 +16,7 @@ class CreatePMaterialesDetalleTable extends Migration
             $table->id();
             $table->bigInteger('id_presup_unidad')->unsigned();
             $table->bigInteger('id_unidadmedida')->unsigned();
+            $table->bigInteger('id_mes')->unsigned();
 
             $table->decimal('costo', 10, 2);
             $table->decimal('cantidad', 10, 2);
@@ -24,6 +25,8 @@ class CreatePMaterialesDetalleTable extends Migration
 
             $table->foreign('id_presup_unidad')->references('id')->on('p_presup_unidad');
             $table->foreign('id_unidadmedida')->references('id')->on('p_unidadmedida');
+            $table->foreign('id_mes')->references('id')->on('meses');
+
         });
     }
 

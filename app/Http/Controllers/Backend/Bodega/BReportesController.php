@@ -2762,7 +2762,7 @@ class BReportesController extends Controller
 
 
 
-    private function reportePDFInicialFinalInformatica($desde, $hasta)
+    public function reportePDFInicialFinalInformatica($desde, $hasta)
     {
         $start = Carbon::parse($desde)->startOfDay();
         $end   = Carbon::parse($hasta)->endOfDay();
