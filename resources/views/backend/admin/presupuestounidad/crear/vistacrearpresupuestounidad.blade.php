@@ -641,6 +641,8 @@
             axios.post(url + '/p/crear/presupuesto/unidad', formData, {})
                 .then((response) => {
 
+                    console.log(response);
+
                     if (response.data.success === 1) {
                         Swal.fire({
                             title: 'Presupuesto ya habia sido creado',
