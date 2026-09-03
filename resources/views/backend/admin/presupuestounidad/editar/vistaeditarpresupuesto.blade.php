@@ -102,61 +102,6 @@
         </div>
     </div>
 
-    {{-- ==================== MODAL NUEVO PROYECTO ==================== --}}
-    <div class="modal fade" id="modalNuevoProyecto">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h4 class="modal-title">Solicitud de Proyecto</h4>
-                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                        <span aria-hidden="true">&times;</span>
-                    </button>
-                </div>
-                <div class="modal-body">
-                    <form id="formulario-nuevo-proyecto">
-                        <div class="card-body">
-                            <div class="card-body">
-                                <div class="row">
-                                    <div class="col-md-12">
-
-                                        <div class="form-group" style="margin-top: 15px">
-                                            <label>Descripción</label>
-                                            <input type="text" class="form-control" autocomplete="off"
-                                                   maxlength="300" id="proyecto-descripcion-nuevo" placeholder="Nombre">
-                                        </div>
-
-                                        <div class="form-group">
-                                            <label>Monto ($)</label>
-                                            <input type="number" class="form-control" autocomplete="off"
-                                                   id="proyecto-costo-nuevo" placeholder="0.00">
-                                        </div>
-
-                                        {{-- SELECT MES DE EJECUCIÓN --}}
-                                        <div class="form-group">
-                                            <label>Mes de Ejecución</label>
-                                            <select class="form-control" id="select-mes-proyecto-nuevo">
-                                                <option value="">-- Seleccione un Mes --</option>
-                                                {{-- Los meses se inyectan desde el contenedor (arrayMeses disponible ahí).
-                                                     Si este modal está en la vista padre sin acceso a $arrayMeses,
-                                                     se puede mover al contenedor o pasar la variable aquí también.
-                                                     En este proyecto el modal de Nuevo Material ya está en el contenedor,
-                                                     así que el modal de proyecto también se mueve allá (ver contenedor). --}}
-                                            </select>
-                                        </div>
-
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-                <div class="modal-footer justify-content-between">
-                    <button type="button" class="btn btn-default" data-dismiss="modal">Cerrar</button>
-                    <button type="button" class="btn btn-primary" onclick="verificarNuevoProyecto()">Agregar</button>
-                </div>
-            </div>
-        </div>
-    </div>
 
 </div>
 
