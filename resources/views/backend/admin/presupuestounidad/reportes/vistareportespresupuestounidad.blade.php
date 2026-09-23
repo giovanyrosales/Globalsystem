@@ -55,6 +55,11 @@
                                             <img src="{{ asset('images/logoexcel.png') }}" width="48px" height="55px">
                                             Generar Excel
                                         </button>
+
+                                        <button type="button" onclick="generarPdfTotalMesEjecutado()" class="btn" style="margin-left: 15px; border-color: black; border-radius: 0.1px;">
+                                            <img src="{{ asset('images/logopdf.png') }}" width="55px" height="55px">
+                                            Mes Ejecutado
+                                        </button>
                                     </div>
 
                                     <hr style="height: 0.5px; background-color: grey">
@@ -303,6 +308,11 @@
         function generarPdfTotales(){
             var idanio = document.getElementById('select-anio').value;
             window.open("{{ URL::to('admin/p/generador/pdf/totales') }}/" + idanio);
+        }
+
+        function generarPdfTotalMesEjecutado(){
+            var idanio = document.getElementById('select-anio').value;
+            window.open("{{ URL::to('admin/p/generador/pdf/totales/mesejecutado') }}/" + idanio);
         }
 
         function generarExcelTotales(){

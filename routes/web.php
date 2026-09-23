@@ -788,6 +788,14 @@ Route::post('/admin/p/generador/verificar/consolidado/presupuesto', [Configuraci
 
 // retornar PDF con los totales, se envía el ID año
 Route::get('/admin/p/generador/pdf/totales/{anio}', [ReportesPresupuestoUnidadController::class, 'generarTotalesPdfPresupuesto']);
+
+// retornar PDF con los totales, se envía el ID año - MES EJECUTADO
+Route::get('/admin/p/generador/pdf/totales/mesejecutado/{anio}', [ReportesPresupuestoUnidadController::class, 'generarTotalesPdfPresupuestoMesEjecutado']);
+
+
+
+
+
 // retorna Excel con los totales, se envía el ID año
 Route::get('/admin/p/generador/excel/totales/{anio}', [ReportesPresupuestoUnidadController::class, 'generarTotalesExcelPresupuesto']);
 // retorna PDF con el consolidado, todos los presupuestos ya están aprobados

@@ -1796,4 +1796,379 @@ class ReportesPresupuestoUnidadController extends Controller
     }
 
 
+
+
+
+
+
+
+
+
+
+    /**
+     * Reporte de materiales presupuestados (todas las unidades aprobadas del
+     * año) ORDENADO POR MES DE EJECUCIÓN, con una tabla resumen final de
+     * MES -> CÓDIGO -> TOTAL.
+     *
+     * Supuestos:
+     *  - Tanto P_PresupUnidadDetalle como P_ProyectosAprobados tienen columna
+     *    id_mes (mes de ejecución), igual que en generarPdfSoloUnaUnidad.
+     *  - La tabla Meses tiene id 1..12 en orden calendario (1 = Enero ...
+     *    12 = Diciembre). Si tu tabla usa otro orden, cambia el orderBy de
+     *    $mesesOrdenados más abajo.
+     *  - Un mismo material puede tener detalle en varias unidades
+     *    presupuestarias, y potencialmente con distinto mes de ejecución en
+     *    cada una; por eso el agrupamiento es por (material, mes), no solo
+     *    por material.
+     *
+     * OPTIMIZACIONES (mismo criterio que los demás reportes):
+     *  - Todos los catálogos (ObjEspecifico, P_UnidadMedida, Meses,
+     *    P_Materiales) se cargan UNA sola vez y se indexan en memoria.
+     *  - El detalle de presupuesto se trae con UN solo whereIn() para todas
+     *    las unidades aprobadas del año, sin queries dentro de foreach.
+     */
+    public function generarTotalesPdfPresupuestoMesEjecutado($anio)
+    {
+        ini_set("pcre.backtrack_limit", "5000000");
+
+        // ─────────────────────────────────────────────────────────────
+        // 1) Unidades presupuestarias aprobadas para el año
+        // ─────────────────────────────────────────────────────────────
+        $arrayPresupuestoUni = P_PresupUnidad::where('id_anio', $anio)
+            ->where('id_estado', 3) // SOLO APROBADOS
+            ->orderBy('id', 'ASC')
+            ->get();
+
+        $pilaIdPresu = $arrayPresupuestoUni->pluck('id')->all();
+
+        $fechaanio = P_AnioPresupuesto::where('id', $anio)->pluck('nombre')->first();
+
+        // ─────────────────────────────────────────────────────────────
+        // 2) Catálogos cargados UNA sola vez e indexados en memoria
+        // ─────────────────────────────────────────────────────────────
+        $objEspecificosById = ObjEspecifico::all()->keyBy('id');
+        $unidadMedidasById  = P_UnidadMedida::all()->keyBy('id');
+        $materialesById     = P_Materiales::all()->keyBy('id');
+
+        // Orden calendario de los meses (ajusta el orderBy si tu tabla no usa id=1..12)
+        $mesesOrdenados = Meses::orderBy('id', 'ASC')->get();
+        $mesesById      = $mesesOrdenados->keyBy('id');
+
+        $SIN_MES_ID     = 0;
+        $SIN_MES_NOMBRE = 'SIN MES ASIGNADO';
+
+        // ─────────────────────────────────────────────────────────────
+        // 3) Proyectos aprobados de las unidades del año
+        // ─────────────────────────────────────────────────────────────
+        $listadoProyectoAprobados = P_ProyectosAprobados::whereIn('id_presup_unidad', $pilaIdPresu)
+            ->orderBy('descripcion', 'ASC')
+            ->get();
+
+        foreach ($listadoProyectoAprobados as $dd) {
+            $infoObjeto = $objEspecificosById->get($dd->id_objespeci);
+
+            $dd->codigoobj   = $infoObjeto->codigo ?? null;
+            $dd->objeto      = $infoObjeto ? ($infoObjeto->codigo . " - " . $infoObjeto->nombre) : '';
+            $dd->costoFormat = '$' . number_format((float) $dd->costo, 2, '.', ',');
+
+            $idMes         = $dd->id_mes ?: $SIN_MES_ID;
+            $infoMes       = $idMes ? $mesesById->get($idMes) : null;
+            $dd->idmesNorm = $idMes;
+            $dd->nombreMes = $infoMes->nombre ?? $SIN_MES_NOMBRE;
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        // 4) Detalle de presupuesto de TODAS las unidades del año,
+        //    agrupado por (material, mes) — UNA sola consulta.
+        // ─────────────────────────────────────────────────────────────
+        $detalles = P_PresupUnidadDetalle::whereIn('id_presup_unidad', $pilaIdPresu)->get();
+
+        $agrupadoMaterialMes = $detalles->groupBy(function ($d) use ($SIN_MES_ID) {
+            return $d->id_material . '-' . ($d->id_mes ?: $SIN_MES_ID);
+        });
+
+        $dataArray = [];
+
+        foreach ($agrupadoMaterialMes as $grupo) {
+            $primero = $grupo->first();
+            $mm      = $materialesById->get($primero->id_material);
+
+            if (!$mm) {
+                continue;
+            }
+
+            $infoObj          = $objEspecificosById->get($mm->id_objespecifico);
+            $infoUnidadMedida = $unidadMedidasById->get($mm->id_unidadmedida);
+
+            $sumacantidad = 0;
+            $multiFila    = 0;
+
+            foreach ($grupo as $info) {
+                // PERIODO SIEMPRE SERA 1 COMO MÍNIMO
+                $multiFila    += ($info->cantidad * $info->precio) * $info->periodo;
+                $sumacantidad += ($info->cantidad * $info->periodo);
+            }
+
+            if ($sumacantidad <= 0) {
+                continue;
+            }
+
+            $idMes   = $primero->id_mes ?: $SIN_MES_ID;
+            $infoMes = $idMes ? $mesesById->get($idMes) : null;
+
+            $dataArray[] = [
+                'idmes'        => $idMes,
+                'nombreMes'    => $infoMes->nombre ?? $SIN_MES_NOMBRE,
+                'codigo'       => $infoObj->codigo ?? null,
+                'descripcion'  => $mm->descripcion,
+                'unidadmedida' => $infoUnidadMedida->nombre ?? '',
+                'sumacantidad' => number_format((float) $sumacantidad, 2, '.', ','),
+                'total'        => number_format((float) $multiFila, 2, '.', ','),
+                'totalDecimal' => $multiFila,
+            ];
+        }
+
+        // Los proyectos aprobados también entran a la tabla, con su propio mes
+        foreach ($listadoProyectoAprobados as $lpa) {
+            $dataArray[] = [
+                'idmes'        => $lpa->idmesNorm,
+                'nombreMes'    => $lpa->nombreMes,
+                'codigo'       => $lpa->codigoobj,
+                'descripcion'  => $lpa->descripcion,
+                'unidadmedida' => 'PROYECTO',
+                'sumacantidad' => '1.0',
+                'total'        => number_format((float) $lpa->costo, 2, '.', ','),
+                'totalDecimal' => (float) $lpa->costo,
+            ];
+        }
+
+        // Orden: primero por mes de ejecución, luego por código, luego por descripción.
+        // Los "SIN MES ASIGNADO" (idmes = 0) quedan al final.
+        usort($dataArray, function ($a, $b) {
+            $aMes = $a['idmes'] == 0 ? PHP_INT_MAX : $a['idmes'];
+            $bMes = $b['idmes'] == 0 ? PHP_INT_MAX : $b['idmes'];
+
+            return $aMes <=> $bMes
+                ?: $a['codigo'] <=> $b['codigo']
+                    ?: $a['descripcion'] <=> $b['descripcion'];
+        });
+
+        $totalGeneral    = collect($dataArray)->sum('totalDecimal');
+        $totalGeneralFmt = number_format((float) $totalGeneral, 2, '.', ',');
+
+        // ─────────────────────────────────────────────────────────────
+        // 5) Resumen final: MES -> CÓDIGO -> TOTAL
+        // ─────────────────────────────────────────────────────────────
+        $resumenPorMes = collect($dataArray)
+            ->groupBy('idmes')
+            ->map(function ($filasDelMes) {
+                $codigos = $filasDelMes
+                    ->groupBy('codigo')
+                    ->map(function ($filasDelCodigo, $codigo) {
+                        return [
+                            'codigo' => $codigo,
+                            'total'  => $filasDelCodigo->sum('totalDecimal'),
+                        ];
+                    })
+                    ->sortBy('codigo')
+                    ->values();
+
+                return [
+                    'idmes'      => $filasDelMes->first()['idmes'],
+                    'nombreMes'  => $filasDelMes->first()['nombreMes'],
+                    'codigos'    => $codigos,
+                    'subtotal'   => $filasDelMes->sum('totalDecimal'),
+                ];
+            })
+            ->sortBy(function ($mes) {
+                return $mes['idmes'] == 0 ? PHP_INT_MAX : $mes['idmes'];
+            })
+            ->values();
+
+        // ─────────────────────────────────────────────────────────────
+        // 6) Generar el PDF
+        // ─────────────────────────────────────────────────────────────
+        // Carpeta temporal propia de la app (evita el Permission denied al
+        // intentar crear/escribir la carpeta interna de vendor/mpdf/mpdf/tmp).
+        $mpdfTempDir = storage_path('app/mpdf_temp');
+        if (!is_dir($mpdfTempDir)) {
+            mkdir($mpdfTempDir, 0775, true);
+        }
+
+        $mpdf = new \Mpdf\Mpdf([
+            'tempDir' => $mpdfTempDir,
+            'format'  => 'LETTER',
+        ]);
+        $mpdf->SetTitle('Totales por Mes de Ejecución');
+        $mpdf->showImageErrors = false;
+
+        $logoalcaldia = 'images/logo.png';
+
+        // ── Encabezado (idéntico al resto de reportes) ─────────────────────────
+        $tabla = "
+<table width='100%' style='border-collapse:collapse; font-family:Arial, sans-serif;'>
+    <tr>
+        <td style='width:20%; border:0.8px solid #000; padding:6px 8px;'>
+            <table width='100%'>
+                <tr>
+                    <td style='width:30%; text-align:left;'>
+                        <img src='{$logoalcaldia}' style='height:38px'>
+                    </td>
+                    <td style='width:70%; text-align:left; color:#104e8c;
+                                font-size:13px; font-weight:bold; line-height:1.3;'>
+                        SANTA ANA NORTE<br>EL SALVADOR
+                    </td>
+                </tr>
+            </table>
+        </td>
+        <td style='width:55%; border-top:0.8px solid #000; border-bottom:0.8px solid #000;
+                   padding:6px 8px; text-align:center; font-size:15px; font-weight:bold;'>
+            REPORTE DE TOTALES POR MES DE EJECUCIÓN<br>
+        </td>
+        <td style='width:25%; border:0.8px solid #000; padding:0; vertical-align:top;'>
+            <table width='100%' style='font-size:10px;'>
+                <tr>
+                    <td width='40%' style='border-right:0.8px solid #000;
+                                           border-bottom:0.8px solid #000; padding:4px 6px;'>
+                        <strong>Código:</strong>
+                    </td>
+                    <td width='60%' style='border-bottom:0.8px solid #000;
+                                           padding:4px 6px; text-align:center;'></td>
+                </tr>
+                <tr>
+                    <td style='border-right:0.8px solid #000;
+                               border-bottom:0.8px solid #000; padding:4px 6px;'>
+                        <strong>Versión:</strong>
+                    </td>
+                    <td style='border-bottom:0.8px solid #000;
+                               padding:4px 6px; text-align:center;'>000</td>
+                </tr>
+                <tr>
+                    <td style='border-right:0.8px solid #000; padding:4px 6px;'>
+                        <strong>Fecha de vigencia:</strong>
+                    </td>
+                    <td style='padding:4px 6px; text-align:center;'></td>
+                </tr>
+            </table>
+        </td>
+    </tr>
+</table>
+<br>";
+
+        $filas = [];
+
+        $filas[] = "<p class='fecha'><strong>Año: {$fechaanio}</strong></p>";
+
+        // ── Tabla principal: materiales/proyectos ordenados por mes de ejecución ──
+        $filas[] = "<table id='tablaFor' style='width: 100%'>
+        <tbody>
+        <tr>
+            <th style='text-align: center; font-size:11px; width: 12%; font-weight: bold'>MES EJEC.</th>
+            <th style='text-align: center; font-size:11px; width: 12%; font-weight: bold'>COD. ESPECÍFICO</th>
+            <th style='text-align: center; font-size:11px; width: 24%; font-weight: bold'>NOMBRE</th>
+            <th style='text-align: center; font-size:11px; width: 14%; font-weight: bold'>UNI. MEDIDA</th>
+            <th style='text-align: center; font-size:11px; width: 14%; font-weight: bold'>CANTIDAD</th>
+            <th style='text-align: center; font-size:11px; width: 14%; font-weight: bold'>TOTAL</th>
+        </tr>";
+
+        $mesActual = null;
+
+        foreach ($dataArray as $fila) {
+            // Encabezado de sección cada vez que cambia el mes (deja visible el orden)
+            if ($fila['idmes'] !== $mesActual) {
+                $mesActual = $fila['idmes'];
+
+                $filas[] = "<tr>
+                <td colspan='6' style='background-color:#e8e8e8; font-size:11px; text-align: left; font-weight: bold; padding:4px 6px;'>{$fila['nombreMes']}</td>
+            </tr>";
+            }
+
+            $filas[] = "<tr>
+            <td style='font-size:11px; text-align: center; font-weight: normal'></td>
+            <td style='font-size:11px; text-align: center; font-weight: normal'>{$fila['codigo']}</td>
+            <td style='font-size:11px; text-align: center; font-weight: normal'>{$fila['descripcion']}</td>
+            <td style='font-size:11px; text-align: center; font-weight: normal'>{$fila['unidadmedida']}</td>
+            <td style='font-size:11px; text-align: center; font-weight: normal'>{$fila['sumacantidad']}</td>
+            <td style='font-size:11px; text-align: center; font-weight: normal'>\${$fila['total']}</td>
+        </tr>";
+        }
+
+        $filas[] = "<tr>
+        <td colspan='4' style='font-size:11px; text-align: right; font-weight: normal'></td>
+        <td style='font-size:11px; text-align: center; font-weight: normal'>TOTALES</td>
+        <td style='font-size:11px; text-align: center; font-weight: normal'>\${$totalGeneralFmt}</td>
+    </tr>";
+
+        $filas[] = "</tbody></table>";
+
+        // ── Tabla final: MES -> CÓDIGO -> TOTAL ────────────────────────────────
+        $filas[] = "<br><p class='fecha'><strong>TOTALES POR MES DE EJECUCIÓN Y CÓDIGO</strong></p>";
+
+        $filas[] = "<table id='tablaResumenMes' style='width: 70%; border-collapse: collapse;'>
+        <tbody>
+        <tr>
+            <th style='border:0.8px solid #000; text-align: center; font-size:13px; width: 34%; font-weight: bold; padding:4px 6px;'>MES</th>
+            <th style='border:0.8px solid #000; text-align: center; font-size:13px; width: 33%; font-weight: bold; padding:4px 6px;'>CÓDIGO</th>
+            <th style='border:0.8px solid #000; text-align: center; font-size:13px; width: 33%; font-weight: bold; padding:4px 6px;'>TOTAL</th>
+        </tr>";
+
+        foreach ($resumenPorMes as $mes) {
+            $cantCodigos = $mes['codigos']->count();
+            $rowspan     = max($cantCodigos, 1);
+            $primero     = true;
+
+            if ($cantCodigos === 0) {
+                continue;
+            }
+
+            foreach ($mes['codigos'] as $rc) {
+                $totalRcFmt = number_format((float) $rc['total'], 2, '.', ',');
+
+                $filas[] = "<tr>";
+
+                if ($primero) {
+                    $filas[] = "<td rowspan='{$rowspan}' style='border:0.8px solid #000; font-size:11px; text-align: center; font-weight: bold; vertical-align: middle;'>{$mes['nombreMes']}</td>";
+                    $primero = false;
+                }
+
+                $filas[] = "<td style='border:0.8px solid #000; font-size:11px; text-align: center; font-weight: normal; padding:3px 6px;'>{$rc['codigo']}</td>
+                <td style='border:0.8px solid #000; font-size:11px; text-align: center; font-weight: normal; padding:3px 6px;'>\${$totalRcFmt}</td>
+            </tr>";
+            }
+
+            $subtotalMesFmt = number_format((float) $mes['subtotal'], 2, '.', ',');
+            $filas[] = "<tr>
+            <td style='border:0.8px solid #000; font-size:11px; text-align: center; font-weight: bold; background-color:#f2f2f2;'></td>
+            <td style='border:0.8px solid #000; font-size:11px; text-align: right; font-weight: bold; background-color:#f2f2f2; padding:3px 6px;'>Subtotal {$mes['nombreMes']}:</td>
+            <td style='border:0.8px solid #000; font-size:11px; text-align: center; font-weight: bold; background-color:#f2f2f2; padding:3px 6px;'>\${$subtotalMesFmt}</td>
+        </tr>";
+        }
+
+        $filas[] = "<tr>
+        <td colspan='2' style='border:0.8px solid #000; font-size:11px; text-align: center; font-weight: bold; padding:3px 6px;'>TOTAL GENERAL</td>
+        <td style='border:0.8px solid #000; font-size:11px; text-align: center; font-weight: bold; padding:3px 6px;'>\${$totalGeneralFmt}</td>
+    </tr>";
+
+        $filas[] = "</tbody></table>";
+
+        $tabla .= implode('', $filas);
+
+        $stylesheet = file_get_contents('css/csspdftotales.css');
+        $mpdf->WriteHTML($stylesheet, 1);
+        $mpdf->setFooter("Página: " . '{PAGENO}' . "/" . '{nb}');
+        $mpdf->WriteHTML($tabla, 2);
+        $mpdf->Output();
+    }
+
+
+
+
+
+
+
+
+
+
+
+
 }
