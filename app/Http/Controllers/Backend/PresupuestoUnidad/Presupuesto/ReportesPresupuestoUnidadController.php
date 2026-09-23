@@ -376,8 +376,42 @@ class ReportesPresupuestoUnidadController extends Controller
         }
 
 
-
-    // retornar PDF con los totales, se envía el ID año
+    /**
+     * Reporte consolidado de totales de presupuesto.
+     *
+     * OPTIMIZACIONES APLICADAS respecto a la versión original:
+     *
+     *  1. Se eliminaron los N+1 queries dentro de foreach:
+     *     - ObjEspecifico se consulta UNA sola vez completo y se indexa
+     *       en memoria (keyBy / groupBy) en vez de hacer ->where()->first()
+     *       por cada proyecto aprobado, por cada material y por cada objeto.
+     *     - P_PresupUnidadDetalle se consulta UNA sola vez con whereIn() y
+     *       se agrupa por id_material, en vez de hacer una consulta por
+     *       cada combinación material x unidad presupuestaria
+     *       (antes: materiales * unidades_presupuestarias consultas).
+     *     - Cuenta y P_Materiales también se cargan una sola vez y se
+     *       agrupan en memoria (groupBy) en vez de re-consultarse dentro
+     *       de cada nivel del árbol Rubro -> Cuenta -> ObjEspecifico.
+     *
+     *  2. El cruce dataArray <-> material se hace con una colección
+     *     indexada por id (keyBy('idmaterial')) en vez de un doble foreach
+     *     (antes O(n*m), ahora O(1) por búsqueda).
+     *
+     *  3. Se corrige un bug latente: el bloque que agregaba las filas
+     *     "PROYECTO" comparaba contra $dataMM (la última variable de un
+     *     foreach ya cerrado), por lo que en la práctica solo comparaba
+     *     contra el último material listado del objeto. Ahora los
+     *     proyectos aprobados se agrupan por id_objespeci
+     *     (groupBy('id_objespeci')) y se listan correctamente para
+     *     CADA objeto específico, sin depender de variables residuales.
+     *
+     *  4. Construcción del HTML con arreglo + implode() en vez de
+     *     concatenación repetida de strings, más liviano en memoria
+     *     para reportes grandes.
+     *
+     *  5. Se usa el nuevo encabezado solicitado (idéntico al del
+     *     reporte de conteo físico).
+     */
     public function generarTotalesPdfPresupuesto($idanio)
     {
         ini_set("pcre.backtrack_limit", "5000000");
@@ -402,16 +436,16 @@ class ReportesPresupuestoUnidadController extends Controller
         // ─────────────────────────────────────────────────────────────
         // 3) Catálogos cargados UNA sola vez e indexados en memoria
         // ─────────────────────────────────────────────────────────────
-        $objEspecificos       = ObjEspecifico::orderBy('codigo', 'ASC')->get();
-        $objEspecificosById   = $objEspecificos->keyBy('id');
+        $objEspecificos = ObjEspecifico::orderBy('codigo', 'ASC')->get();
+        $objEspecificosById = $objEspecificos->keyBy('id');
         $objEspecificosByCuenta = $objEspecificos->groupBy('id_cuenta');
 
         $unidadMedidasById = P_UnidadMedida::all()->keyBy('id');
 
-        $rubro         = Rubro::orderBy('codigo')->get();
+        $rubro = Rubro::orderBy('codigo')->get();
         $cuentasByRubro = Cuenta::orderBy('codigo', 'ASC')->get()->groupBy('id_rubro');
 
-        $materiales      = P_Materiales::orderBy('descripcion')->get();
+        $materiales = P_Materiales::orderBy('descripcion')->get();
         $materialesByObj = $materiales->groupBy('id_objespecifico');
 
         // Detalle de presupuesto por unidad, agrupado por material (evita N+1)
@@ -426,18 +460,18 @@ class ReportesPresupuestoUnidadController extends Controller
         // 4) Enriquecer proyectos aprobados usando los catálogos en memoria
         // ─────────────────────────────────────────────────────────────
         foreach ($listadoProyectoAprobados as $dd) {
-            $infoObjeto   = $objEspecificosById->get($dd->id_objespeci);
-            $infoFuenteR  = $objEspecificosById->get($dd->id_fuenter);
-            $infoLinea    = $objEspecificosById->get($dd->id_lineatrabajo);
-            $infoArea     = $objEspecificosById->get($dd->id_areagestion);
+            $infoObjeto = $objEspecificosById->get($dd->id_objespeci);
+            $infoFuenteR = $objEspecificosById->get($dd->id_fuenter);
+            $infoLinea = $objEspecificosById->get($dd->id_lineatrabajo);
+            $infoArea = $objEspecificosById->get($dd->id_areagestion);
 
-            $dd->codigoobj   = $infoObjeto->codigo ?? null;
-            $dd->objeto      = $infoObjeto ? ($infoObjeto->codigo . " - " . $infoObjeto->nombre) : '';
+            $dd->codigoobj = $infoObjeto->codigo ?? null;
+            $dd->objeto = $infoObjeto ? ($infoObjeto->codigo . " - " . $infoObjeto->nombre) : '';
             $dd->fuenterecurso = $infoFuenteR ? ($infoFuenteR->codigo . " - " . $infoFuenteR->nombre) : '';
-            $dd->lineatrabajo  = $infoLinea ? ($infoLinea->codigo . " - " . $infoLinea->nombre) : '';
-            $dd->areagestion   = $infoArea ? ($infoArea->codigo . " - " . $infoArea->nombre) : '';
+            $dd->lineatrabajo = $infoLinea ? ($infoLinea->codigo . " - " . $infoLinea->nombre) : '';
+            $dd->areagestion = $infoArea ? ($infoArea->codigo . " - " . $infoArea->nombre) : '';
 
-            $dd->costoFormat = '$' . number_format((float) $dd->costo, 2, '.', ',');
+            $dd->costoFormat = '$' . number_format((float)$dd->costo, 2, '.', ',');
         }
 
         $fechaanio = P_AnioPresupuesto::where('id', $idanio)->pluck('nombre')->first();
@@ -445,38 +479,38 @@ class ReportesPresupuestoUnidadController extends Controller
         // ─────────────────────────────────────────────────────────────
         // 5) Totales por material (sin consultar la BD dentro del loop)
         // ─────────────────────────────────────────────────────────────
-        $totalColumnaGlobal   = 0;
+        $totalColumnaGlobal = 0;
         $totalColumnaCantidad = 0;
-        $dataArray            = [];
+        $dataArray = [];
 
         foreach ($materiales as $mm) {
             $infoObj = $objEspecificosById->get($mm->id_objespecifico);
 
-            $detalles      = $detallesByMaterial->get($mm->id, collect());
-            $sumacantidad  = 0;
-            $multiFila     = 0;
+            $detalles = $detallesByMaterial->get($mm->id, collect());
+            $sumacantidad = 0;
+            $multiFila = 0;
 
             foreach ($detalles as $info) {
                 // PERIODO SIEMPRE SERA 1 COMO MÍNIMO
-                $multiFila    += ($info->cantidad * $info->precio) * $info->periodo;
+                $multiFila += ($info->cantidad * $info->precio) * $info->periodo;
                 $sumacantidad += ($info->cantidad * $info->periodo);
             }
 
             if ($sumacantidad > 0) {
-                $totalColumnaGlobal   += $multiFila;
+                $totalColumnaGlobal += $multiFila;
                 $totalColumnaCantidad += $sumacantidad;
 
                 $infoUnidadMedida = $unidadMedidasById->get($mm->id_unidadmedida);
 
                 $dataArray[] = [
-                    'idmaterial'       => $mm->id,
-                    'codigo'           => $infoObj->numero ?? null,
-                    'descripcion'      => $mm->descripcion,
-                    'sumacantidad'     => number_format((float) $sumacantidad, 2, '.', ','),
+                    'idmaterial' => $mm->id,
+                    'codigo' => $infoObj->numero ?? null,
+                    'descripcion' => $mm->descripcion,
+                    'sumacantidad' => number_format((float)$sumacantidad, 2, '.', ','),
                     'sumacantidadDeci' => $sumacantidad,
-                    'unidadmedida'     => $infoUnidadMedida->nombre ?? '',
-                    'total'            => number_format((float) $multiFila, 2, '.', ','),
-                    'totalDecimal'     => $multiFila,
+                    'unidadmedida' => $infoUnidadMedida->nombre ?? '',
+                    'total' => number_format((float)$multiFila, 2, '.', ','),
+                    'totalDecimal' => $multiFila,
                 ];
             }
         }
@@ -491,11 +525,11 @@ class ReportesPresupuestoUnidadController extends Controller
         // Sumar los proyectos aprobados (siempre se muestran en este reporte)
         foreach ($listadoProyectoAprobados as $lpa) {
             $totalColumnaCantidad += 1;
-            $totalColumnaGlobal   += $lpa->costo;
+            $totalColumnaGlobal += $lpa->costo;
         }
 
-        $totalColumnaCantidadFmt = number_format((float) $totalColumnaCantidad, 2, '.', ',');
-        $totalColumnaGlobalFmt   = number_format((float) $totalColumnaGlobal, 2, '.', ',');
+        $totalColumnaCantidadFmt = number_format((float)$totalColumnaCantidad, 2, '.', ',');
+        $totalColumnaGlobalFmt = number_format((float)$totalColumnaGlobal, 2, '.', ',');
 
         $pilaIdMaterial = collect($dataArray)->pluck('idmaterial')->filter()->all();
 
@@ -526,9 +560,9 @@ class ReportesPresupuestoUnidadController extends Controller
                     foreach ($subSecciones3Materiales as $subLista) {
                         $dda = $dataArrayByMaterial->get($subLista->id);
                         if ($dda) {
-                            $subLista->codigo       = $ll->codigo;
+                            $subLista->codigo = $ll->codigo;
                             $subLista->sumacantidad = $dda['sumacantidad'];
-                            $subLista->totalfila    = $dda['total'];
+                            $subLista->totalfila = $dda['total'];
                             $subLista->unidadmedida = $dda['unidadmedida'];
 
                             $sumaObjeto += $dda['totalDecimal'];
@@ -541,26 +575,27 @@ class ReportesPresupuestoUnidadController extends Controller
 
                     $sumaObjetoTotal += $sumaObjeto;
 
-                    $ll->sumaobjeto      = number_format((float) $sumaObjeto, 2, '.', ',');
-                    $ll->sumaobjetoDeci  = $sumaObjeto;
-                    $ll->material        = $subSecciones3Materiales;
-                    $ll->proyectos       = $proyectosDeEsteObjeto;
+                    $ll->sumaobjeto = number_format((float)$sumaObjeto, 2, '.', ',');
+                    $ll->sumaobjetoDeci = $sumaObjeto;
+                    $ll->material = $subSecciones3Materiales;
+                    $ll->proyectos = $proyectosDeEsteObjeto;
                 }
 
                 $sumaRubro += $sumaObjetoTotal;
-                $lista->sumaobjetototal    = number_format((float) $sumaObjetoTotal, 2, '.', ',');
-                $lista->sumaobjetoDecimal  = $sumaObjetoTotal;
-                $lista->objeto             = $subSecciones2;
+                $lista->sumaobjetototal = number_format((float)$sumaObjetoTotal, 2, '.', ',');
+                $lista->sumaobjetoDecimal = $sumaObjetoTotal;
+                $lista->objeto = $subSecciones2;
             }
 
-            $secciones->sumarubro        = number_format((float) $sumaRubro, 2, '.', ',');
+            $secciones->sumarubro = number_format((float)$sumaRubro, 2, '.', ',');
             $secciones->sumarubroDecimal = $sumaRubro;
-            $secciones->cuenta           = $subSecciones;
+            $secciones->cuenta = $subSecciones;
         }
 
         // ─────────────────────────────────────────────────────────────
         // 7) Generar el PDF
         // ─────────────────────────────────────────────────────────────
+        //$mpdf = new \Mpdf\Mpdf(['tempDir' => sys_get_temp_dir(), 'format' => 'LETTER']);
         $mpdf = new \Mpdf\Mpdf(['format' => 'LETTER']);
         $mpdf->SetTitle('Consolidado Totales');
         $mpdf->showImageErrors = false;
@@ -717,6 +752,14 @@ class ReportesPresupuestoUnidadController extends Controller
         $mpdf->WriteHTML($tabla, 2);
         $mpdf->Output();
     }
+
+
+
+
+
+
+
+
 
 
     // retorna Excel con los totales, se envía el ID año
