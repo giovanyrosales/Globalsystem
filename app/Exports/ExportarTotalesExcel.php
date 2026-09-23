@@ -9,6 +9,7 @@ use App\Models\P_PresupUnidadDetalle;
 use App\Models\P_ProyectosAprobados;
 use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\WithHeadings;
+use Maatwebsite\Excel\Concerns\WithMultipleSheets;   // ← esta línea es la clave
 
 /**
 * Exportador de "Totales de presupuesto" a Excel.
