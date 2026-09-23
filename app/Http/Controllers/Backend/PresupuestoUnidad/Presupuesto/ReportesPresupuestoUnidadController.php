@@ -1241,46 +1241,6 @@ class ReportesPresupuestoUnidadController extends Controller
     }
 
 
-    /**
-     * Reporte consolidado de totales de presupuesto.
-     *
-     * OPTIMIZACIONES APLICADAS respecto a la versión original:
-     *
-     *  1. Se eliminaron los N+1 queries dentro de foreach:
-     *     - ObjEspecifico se consulta UNA sola vez completo y se indexa
-     *       en memoria (keyBy / groupBy) en vez de hacer ->where()->first()
-     *       por cada proyecto aprobado, por cada material y por cada objeto.
-     *     - P_PresupUnidadDetalle se consulta UNA sola vez con whereIn() y
-     *       se agrupa por id_material, en vez de hacer una consulta por
-     *       cada combinación material x unidad presupuestaria
-     *       (antes: materiales * unidades_presupuestarias consultas).
-     *     - Cuenta y P_Materiales también se cargan una sola vez y se
-     *       agrupan en memoria (groupBy) en vez de re-consultarse dentro
-     *       de cada nivel del árbol Rubro -> Cuenta -> ObjEspecifico.
-     *
-     *  2. El cruce dataArray <-> material se hace con una colección
-     *     indexada por id (keyBy('idmaterial')) en vez de un doble foreach
-     *     (antes O(n*m), ahora O(1) por búsqueda).
-     *
-     *  3. Se corrige un bug latente: el bloque que agregaba las filas
-     *     "PROYECTO" comparaba contra $dataMM (la última variable de un
-     *     foreach ya cerrado), por lo que en la práctica solo comparaba
-     *     contra el último material listado del objeto. Ahora los
-     *     proyectos aprobados se agrupan por id_objespeci
-     *     (groupBy('id_objespeci')) y se listan correctamente para
-     *     CADA objeto específico, sin depender de variables residuales.
-     *
-     *  4. Construcción del HTML con arreglo + implode() en vez de
-     *     concatenación repetida de strings, más liviano en memoria
-     *     para reportes grandes.
-     *
-     *  5. Se usa el nuevo encabezado solicitado (idéntico al del
-     *     reporte de conteo físico).
-     */
-
-
-
-original
 
 
 
