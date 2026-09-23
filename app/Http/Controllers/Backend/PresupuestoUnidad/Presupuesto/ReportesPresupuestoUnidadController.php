@@ -1615,15 +1615,6 @@ class ReportesPresupuestoUnidadController extends Controller
                         <td style='font-size:11px; text-align: center; font-weight: normal'>{$lpa->costoFormat}</td>
                         </tr>";
                     }
-
-                    // SUBTOTAL del objeto específico (código + nombre)
-                    $filas[] = "<tr>
-                    <td style='font-size:10px; text-align: center; font-weight: bold; font-style: italic; background-color:#f2f2f2;'></td>
-                    <td style='font-size:10px; text-align: right; font-weight: bold; font-style: italic; background-color:#f2f2f2;'>Subtotal {$dataObj->codigo} - {$dataObj->nombre}:</td>
-                    <td style='font-size:10px; text-align: center; font-weight: bold; font-style: italic; background-color:#f2f2f2;'></td>
-                    <td style='font-size:10px; text-align: center; font-weight: bold; font-style: italic; background-color:#f2f2f2;'></td>
-                    <td style='font-size:10px; text-align: center; font-weight: bold; font-style: italic; background-color:#f2f2f2;'>\${$dataObj->sumaobjeto}</td>
-                    </tr>";
                 }
             }
         }
@@ -1645,25 +1636,25 @@ class ReportesPresupuestoUnidadController extends Controller
 
         $filas[] = "<br><p class='fecha'><strong>TOTALES POR CÓDIGO PRESUPUESTARIO</strong></p>";
 
-        $filas[] = "<table id='tablaResumen' style='width: 60%'>
+        $filas[] = "<table id='tablaResumen' style='width: 60%; border-collapse: collapse;'>
             <tbody>
             <tr>
-                <th style='text-align: center; font-size:13px; width: 50%; font-weight: bold'>CÓDIGO</th>
-                <th style='text-align: center; font-size:13px; width: 50%; font-weight: bold'>TOTAL</th>
+                <th style='border:0.8px solid #000; text-align: center; font-size:13px; width: 50%; font-weight: bold; padding:4px 6px;'>CÓDIGO</th>
+                <th style='border:0.8px solid #000; text-align: center; font-size:13px; width: 50%; font-weight: bold; padding:4px 6px;'>TOTAL</th>
             </tr>";
 
         foreach ($resumenPorCodigo as $rc) {
             $totalRcFmt = number_format((float)$rc['total'], 2, '.', ',');
 
             $filas[] = "<tr>
-                <td style='font-size:11px; text-align: center; font-weight: normal'>{$rc['codigo']}</td>
-                <td style='font-size:11px; text-align: center; font-weight: normal'>\${$totalRcFmt}</td>
+                <td style='border:0.8px solid #000; font-size:11px; text-align: center; font-weight: normal; padding:3px 6px;'>{$rc['codigo']}</td>
+                <td style='border:0.8px solid #000; font-size:11px; text-align: center; font-weight: normal; padding:3px 6px;'>\${$totalRcFmt}</td>
             </tr>";
         }
 
         $filas[] = "<tr>
-            <td style='font-size:11px; text-align: center; font-weight: bold'>TOTAL GENERAL</td>
-            <td style='font-size:11px; text-align: center; font-weight: bold'>\${$totalColumnaGlobalFmt}</td>
+            <td style='border:0.8px solid #000; font-size:11px; text-align: center; font-weight: bold; padding:3px 6px;'>TOTAL GENERAL</td>
+            <td style='border:0.8px solid #000; font-size:11px; text-align: center; font-weight: bold; padding:3px 6px;'>\${$totalColumnaGlobalFmt}</td>
         </tr>";
 
         $filas[] = "</tbody></table>";
@@ -1678,15 +1669,6 @@ class ReportesPresupuestoUnidadController extends Controller
         $mpdf->WriteHTML($tabla, 2);
         $mpdf->Output();
     }
-
-
-
-
-
-
-
-
-
 
 
 }
