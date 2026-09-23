@@ -960,184 +960,266 @@ class ReportesPresupuestoUnidadController extends Controller
     }
 
 
-
-    public function generarPdfSoloUnaUnidad($anio, $unidad){
-
+    /**
+     * Reporte de presupuesto de UNA unidad/departamento.
+     *
+     * OPTIMIZACIONES APLICADAS (mismo criterio que en generarTotalesPdfPresupuesto):
+     *
+     *  1. Se eliminaron los N+1 queries:
+     *     - ObjEspecifico, P_UnidadMedida y Meses se consultan UNA sola vez
+     *       completos y se indexan en memoria (keyBy) en vez de hacer
+     *       ->where()->first() por cada proyecto, cada material y cada
+     *       objeto específico.
+     *     - El detalle de presupuesto (P_PresupUnidadDetalle) ya se había
+     *       cargado completo al inicio ($infoPresuUniDeta) pero luego se
+     *       volvía a consultar UNA VEZ POR CADA MATERIAL dentro del árbol
+     *       (`P_PresupUnidadDetalle::whereIn(...)->where('id_material', ...)`),
+     *       repitiendo exactamente el mismo dato ya obtenido. Ahora se
+     *       agrupa una sola vez por id_material y se reutiliza.
+     *     - Cuenta, ObjEspecifico y P_Materiales también se cargan una sola
+     *       vez y se agrupan en memoria en vez de re-consultarse dentro de
+     *       cada nivel del árbol Rubro -> Cuenta -> ObjEspecifico.
+     *
+     *  2. Se usa el nuevo encabezado (idéntico al resto de reportes).
+     *
+     *  3. Se agrega, al final, la tabla "TOTALES POR CÓDIGO PRESUPUESTARIO"
+     *     (CÓDIGO, TOTAL), igual que en el reporte consolidado de totales.
+     */
+    public function generarPdfSoloUnaUnidad($anio, $unidad)
+    {
         $presupUnidad = P_PresupUnidad::where('id_anio', $anio)
             ->where('id_departamento', $unidad)
             ->orderBy('id', 'ASC')
             ->first();
 
-        if($presupUnidad == null){
+        if ($presupUnidad == null) {
             return "EL PRESUPUESTO NO FUE ENCONTRADO";
         }
 
-        if($presupUnidad->id_estado != 3){
+        if ($presupUnidad->id_estado != 3) {
             return "EL PRESUPUESTO DE LA UNIDAD NO ESTA APROBADO";
         }
 
         $dataUnidades = P_Departamento::where('id', $presupUnidad->id_departamento)->first();
-        $fechaanio    = P_AnioPresupuesto::where('id', $anio)->pluck('nombre')->first();
+        $fechaanio = P_AnioPresupuesto::where('id', $anio)->pluck('nombre')->first();
 
-        $sumaGlobalUnidades = 0;
+        // ─────────────────────────────────────────────────────────────
+        // 1) Catálogos cargados UNA sola vez e indexados en memoria
+        // ─────────────────────────────────────────────────────────────
+        $objEspecificosOrdenados = ObjEspecifico::orderBy('codigo', 'ASC')->get();
+        $objEspecificosById = $objEspecificosOrdenados->keyBy('id');
+        $objEspecificosByCuenta = $objEspecificosOrdenados->groupBy('id_cuenta');
 
-        $pilaArrayMateriales = array();
-        $pilaArrayPresuUni   = array();
+        $unidadMedidasById = P_UnidadMedida::all()->keyBy('id');
+        $mesesById = Meses::all()->keyBy('id');
 
+        $rubro = Rubro::orderBy('codigo')->get();
+        $cuentasByRubro = Cuenta::orderBy('codigo', 'ASC')->get()->groupBy('id_rubro');
+
+        // ─────────────────────────────────────────────────────────────
+        // 2) Detalle de presupuesto de la unidad (ya venía cargado completo,
+        //    ahora se agrupa una sola vez por material para reutilizarlo)
+        // ─────────────────────────────────────────────────────────────
         $infoPresuUniDeta = P_PresupUnidadDetalle::where('id_presup_unidad', $presupUnidad->id)->get();
 
-        // PROYECTOS APROBADOS
+        $pilaArrayMateriales = $infoPresuUniDeta->pluck('id_material')->all();
+        $detallesByMaterial = $infoPresuUniDeta->groupBy('id_material');
+
+        $materialesByObj = P_Materiales::whereIn('id', $pilaArrayMateriales)
+            ->orderBy('descripcion', 'ASC')
+            ->get()
+            ->groupBy('id_objespecifico');
+
+        // ─────────────────────────────────────────────────────────────
+        // 3) Proyectos aprobados de la unidad
+        // ─────────────────────────────────────────────────────────────
         $listadoProyectoAprobados = P_ProyectosAprobados::where('id_presup_unidad', $presupUnidad->id)
             ->orderBy('descripcion', 'ASC')
             ->get();
 
-        foreach ($listadoProyectoAprobados as $dd){
-            $infoObjeto  = ObjEspecifico::where('id', $dd->id_objespeci)->first();
-            $infoFuenteR = ObjEspecifico::where('id', $dd->id_fuenter)->first();
-            $infoLinea   = ObjEspecifico::where('id', $dd->id_lineatrabajo)->first();
-            $infoArea    = ObjEspecifico::where('id', $dd->id_areagestion)->first();
+        foreach ($listadoProyectoAprobados as $dd) {
+            $infoObjeto = $objEspecificosById->get($dd->id_objespeci);
+            $infoFuenteR = $objEspecificosById->get($dd->id_fuenter);
+            $infoLinea = $objEspecificosById->get($dd->id_lineatrabajo);
+            $infoArea = $objEspecificosById->get($dd->id_areagestion);
 
-            $dd->codigoobj     = $infoObjeto->codigo;
-            $dd->objeto        = $infoObjeto->codigo . " - " . $infoObjeto->nombre;
-            $dd->fuenterecurso = $infoFuenteR->codigo . " - " . $infoFuenteR->nombre;
-            $dd->lineatrabajo  = $infoLinea->codigo . " - " . $infoLinea->nombre;
-            $dd->areagestion   = $infoArea->codigo . " - " . $infoArea->nombre;
-            $dd->costoFormat   = '$' . number_format((float)$dd->costo, 2, '.', ',');
+            $dd->codigoobj = $infoObjeto->codigo ?? null;
+            $dd->objeto = $infoObjeto ? ($infoObjeto->codigo . " - " . $infoObjeto->nombre) : '';
+            $dd->fuenterecurso = $infoFuenteR ? ($infoFuenteR->codigo . " - " . $infoFuenteR->nombre) : '';
+            $dd->lineatrabajo = $infoLinea ? ($infoLinea->codigo . " - " . $infoLinea->nombre) : '';
+            $dd->areagestion = $infoArea ? ($infoArea->codigo . " - " . $infoArea->nombre) : '';
+            $dd->costoFormat = '$' . number_format((float)$dd->costo, 2, '.', ',');
 
             // Mes del proyecto aprobado
-            if($dd->id_mes){
-                $infoMesProy   = Meses::where('id', $dd->id_mes)->first();
-                $dd->nombreMes = $infoMesProy ? $infoMesProy->nombre : '';
-            }else{
-                $dd->nombreMes = '';
-            }
+            $infoMesProy = $dd->id_mes ? $mesesById->get($dd->id_mes) : null;
+            $dd->nombreMes = $infoMesProy->nombre ?? '';
         }
 
-        foreach ($infoPresuUniDeta as $dd){
-            array_push($pilaArrayPresuUni,   $dd->id);
-            array_push($pilaArrayMateriales, $dd->id_material);
-        }
+        // Proyectos aprobados agrupados por objeto específico (cruce O(1))
+        $proyectosPorObjEspeci = $listadoProyectoAprobados->groupBy('id_objespeci');
 
-        $rubro = Rubro::orderBy('codigo')->get();
+        // ─────────────────────────────────────────────────────────────
+        // 4) Construir el árbol Rubro -> Cuenta -> ObjEspecifico -> Material
+        // ─────────────────────────────────────────────────────────────
+        $sumaGlobalUnidades = 0;
 
-        $resultsBloque  = array(); $index  = 0;
-        $resultsBloque2 = array(); $index2 = 0;
-        $resultsBloque3 = array(); $index3 = 0;
+        // Resumen por código presupuestario, para la tabla final
+        $resumenPorCodigo = [];
 
-        foreach($rubro as $secciones){
-            array_push($resultsBloque, $secciones);
+        foreach ($rubro as $secciones) {
+            $subSecciones = $cuentasByRubro->get($secciones->id, collect())->values();
+            $sumaRubro = 0;
 
-            $sumaRubro    = 0;
-
-            $subSecciones = Cuenta::where('id_rubro', $secciones->id)
-                ->orderBy('codigo', 'ASC')
-                ->get();
-
-            foreach ($subSecciones as $lista){
-                array_push($resultsBloque2, $lista);
-
-                $subSecciones2   = ObjEspecifico::where('id_cuenta', $lista->id)
-                    ->orderBy('codigo', 'ASC')
-                    ->get();
-
+            foreach ($subSecciones as $lista) {
+                $subSecciones2 = $objEspecificosByCuenta->get($lista->id, collect())->values();
                 $sumaObjetoTotal = 0;
 
-                foreach ($subSecciones2 as $ll){
-                    array_push($resultsBloque3, $ll);
-
-                    if($ll->codigo == 61109){
+                foreach ($subSecciones2 as $ll) {
+                    if ($ll->codigo == 61109) {
                         $ll->nombre = $ll->nombre . " ( ACTIVOS FIJOS MENORES A $600.00 )";
                     }
 
-                    $subSecciones3 = P_Materiales::whereIn('id', $pilaArrayMateriales)
-                        ->where('id_objespecifico', $ll->id)
-                        ->orderBy('descripcion', 'ASC')
-                        ->get();
-
+                    $subSecciones3 = $materialesByObj->get($ll->id, collect())->values();
                     $sumaObjeto = 0;
 
-                    foreach ($subSecciones3 as $subLista){
+                    foreach ($subSecciones3 as $subLista) {
+                        $uni = $unidadMedidasById->get($subLista->id_unidadmedida);
+                        $subLista->unimedida = $uni->nombre ?? '';
 
-                        $uni = P_UnidadMedida::where('id', $subLista->id_unidadmedida)->first();
-                        $subLista->unimedida = $uni->nombre;
+                        $dataArrayPresu = $detallesByMaterial->get($subLista->id, collect());
 
-                        $dataArrayPresu = P_PresupUnidadDetalle::whereIn('id', $pilaArrayPresuUni)
-                            ->where('id_material', $subLista->id)->get();
-
-                        foreach ($dataArrayPresu as $infoData){
-
+                        foreach ($dataArrayPresu as $infoData) {
                             $resultado = ($infoData->cantidad * $infoData->precio) * $infoData->periodo;
-                            $sumaObjeto         += $resultado;
+                            $sumaObjeto += $resultado;
                             $sumaGlobalUnidades += $resultado;
 
                             $subLista->cantidadpedi = $infoData->cantidad * $infoData->periodo;
                             $subLista->precunitario = '$' . number_format((float)$infoData->precio, 2, '.', ',');
-                            $subLista->total        = '$' . number_format((float)$resultado, 2, '.', ',');
+                            $subLista->total = '$' . number_format((float)$resultado, 2, '.', ',');
 
-                            // <-- Mes de ejecución del material base
-                            if($infoData->id_mes){
-                                $infoMesMat         = Meses::where('id', $infoData->id_mes)->first();
-                                $subLista->nombreMes = $infoMesMat ? $infoMesMat->nombre : '';
-                            }else{
-                                $subLista->nombreMes = '';
-                            }
+                            // Mes de ejecución del material
+                            $infoMesMat = $infoData->id_mes ? $mesesById->get($infoData->id_mes) : null;
+                            $subLista->nombreMes = $infoMesMat->nombre ?? '';
                         }
                     }
 
-                    foreach ($listadoProyectoAprobados as $lpa){
-                        if($ll->codigo == $lpa->codigoobj){
-                            $sumaObjeto         += $lpa->costo;
-                            $sumaGlobalUnidades += $lpa->costo;
-                        }
+                    // Proyectos aprobados que pertenecen a este objeto específico
+                    $proyectosDeEsteObjeto = $proyectosPorObjEspeci->get($ll->id, collect());
+                    $sumaObjetoProyectos = $proyectosDeEsteObjeto->sum('costo');
+
+                    $sumaObjeto += $sumaObjetoProyectos;
+                    $sumaGlobalUnidades += $sumaObjetoProyectos;
+
+                    $sumaObjetoTotal += $sumaObjeto;
+
+                    $ll->sumaobjeto = number_format((float)$sumaObjeto, 2, '.', ',');
+                    $ll->sumaobjetoDeci = $sumaObjeto;
+                    $ll->material = $subSecciones3;
+                    $ll->proyectos = $proyectosDeEsteObjeto;
+
+                    if ($sumaObjeto > 0) {
+                        $resumenPorCodigo[] = [
+                            'codigo' => $ll->codigo,
+                            'nombre' => $ll->nombre,
+                            'total' => $sumaObjeto,
+                        ];
                     }
-
-                    $sumaObjetoTotal        += $sumaObjeto;
-                    $ll->sumaobjeto          = number_format((float)$sumaObjeto, 2, '.', ',');
-                    $ll->sumaobjetoDeci      = $sumaObjeto;
-
-                    $resultsBloque3[$index3]->material = $subSecciones3;
-                    $index3++;
                 }
 
-                $sumaRubro                    += $sumaObjetoTotal;
-                $lista->sumaobjetototal        = number_format((float)$sumaObjetoTotal, 2, '.', ',');
-                $lista->sumaobjetoDecimal      = $sumaObjetoTotal;
-
-                $resultsBloque2[$index2]->objeto = $subSecciones2;
-                $index2++;
+                $sumaRubro += $sumaObjetoTotal;
+                $lista->sumaobjetototal = number_format((float)$sumaObjetoTotal, 2, '.', ',');
+                $lista->sumaobjetoDecimal = $sumaObjetoTotal;
+                $lista->objeto = $subSecciones2;
             }
 
-            $secciones->sumarubro        = number_format((float)$sumaRubro, 2, '.', ',');
+            $secciones->sumarubro = number_format((float)$sumaRubro, 2, '.', ',');
             $secciones->sumarubroDecimal = $sumaRubro;
-
-            $resultsBloque[$index]->cuenta = $subSecciones;
-            $index++;
+            $secciones->cuenta = $subSecciones;
         }
 
-        $sumaGlobalUnidades = number_format((float)($sumaGlobalUnidades), 2, '.', ',');
+        $sumaGlobalUnidadesFmt = number_format((float)$sumaGlobalUnidades, 2, '.', ',');
 
+        // ─────────────────────────────────────────────────────────────
+        // 5) Generar el PDF
+        // ─────────────────────────────────────────────────────────────
         ini_set("pcre.backtrack_limit", "5000000");
-        $logoalcaldia = 'images/logo.png';
 
-        $mpdf = new \Mpdf\Mpdf(['tempDir' => sys_get_temp_dir(), 'format' => 'LETTER']);
+        // Carpeta temporal propia de la app (evita el Permission denied al
+        // intentar crear/escribir la carpeta interna de vendor/mpdf/mpdf/tmp).
+        $mpdfTempDir = storage_path('app/mpdf_temp');
+        if (!is_dir($mpdfTempDir)) {
+            mkdir($mpdfTempDir, 0775, true);
+        }
+
+        $mpdf = new \Mpdf\Mpdf([
+            'tempDir' => $mpdfTempDir,
+            'format' => 'LETTER',
+        ]);
         $mpdf->SetTitle('Presupuesto Unidad');
         $mpdf->showImageErrors = false;
 
-        $tabla  = "<div class='content'>
-        <img id='logo' src='$logoalcaldia' style='width: 90px; height: 90px;'>
-        <p id='titulo'>ALCALDÍA MUNICIPAL DE METAPÁN <br>
-        REPORTE PRESUPUESTO POR UNIDAD
-        </p>
-    </div>";
+        $logoalcaldia = 'images/logo.png';
 
-        $tabla .= "
-        <p class='fecha'><strong>Año: $fechaanio</strong></p>
-        <p>Unidad.</p>";
+        // ── Encabezado (idéntico al resto de reportes) ─────────────────────────
+        $tabla = "
+<table width='100%' style='border-collapse:collapse; font-family:Arial, sans-serif;'>
+    <tr>
+        <td style='width:20%; border:0.8px solid #000; padding:6px 8px;'>
+            <table width='100%'>
+                <tr>
+                    <td style='width:30%; text-align:left;'>
+                        <img src='{$logoalcaldia}' style='height:38px'>
+                    </td>
+                    <td style='width:70%; text-align:left; color:#104e8c;
+                                font-size:13px; font-weight:bold; line-height:1.3;'>
+                        SANTA ANA NORTE<br>EL SALVADOR
+                    </td>
+                </tr>
+            </table>
+        </td>
+        <td style='width:55%; border-top:0.8px solid #000; border-bottom:0.8px solid #000;
+                   padding:6px 8px; text-align:center; font-size:15px; font-weight:bold;'>
+            REPORTE PRESUPUESTO POR UNIDAD<br>
+        </td>
+        <td style='width:25%; border:0.8px solid #000; padding:0; vertical-align:top;'>
+            <table width='100%' style='font-size:10px;'>
+                <tr>
+                    <td width='40%' style='border-right:0.8px solid #000;
+                                           border-bottom:0.8px solid #000; padding:4px 6px;'>
+                        <strong>Código:</strong>
+                    </td>
+                    <td width='60%' style='border-bottom:0.8px solid #000;
+                                           padding:4px 6px; text-align:center;'></td>
+                </tr>
+                <tr>
+                    <td style='border-right:0.8px solid #000;
+                               border-bottom:0.8px solid #000; padding:4px 6px;'>
+                        <strong>Versión:</strong>
+                    </td>
+                    <td style='border-bottom:0.8px solid #000;
+                               padding:4px 6px; text-align:center;'>000</td>
+                </tr>
+                <tr>
+                    <td style='border-right:0.8px solid #000; padding:4px 6px;'>
+                        <strong>Fecha de vigencia:</strong>
+                    </td>
+                    <td style='padding:4px 6px; text-align:center;'></td>
+                </tr>
+            </table>
+        </td>
+    </tr>
+</table>
+<br>";
 
-        $tabla .= "<label>$dataUnidades->nombre</label>";
+        // Construcción del cuerpo con array + implode (más liviano que concatenar strings)
+        $filas = [];
 
-        // Tabla con 7 columnas — se agrega MES EJEC.
-        $tabla .= "<table id='tablaFor' style='width: 100%'>
+        $filas[] = "<p class='fecha'><strong>Año: {$fechaanio}</strong></p>
+                <p>Unidad.</p>
+                <label>{$dataUnidades->nombre}</label>";
+
+        // Tabla con 7 columnas — incluye MES EJEC.
+        $filas[] = "<table id='tablaFor' style='width: 100%'>
         <tbody>
         <tr>
             <th style='text-align: center; font-size:11px; width: 10%; font-weight: bold'>COD. ESPECÍFICO</th>
@@ -1149,89 +1231,119 @@ class ReportesPresupuestoUnidadController extends Controller
             <th style='text-align: center; font-size:11px; width: 12%; font-weight: bold'>TOTAL</th>
         </tr>";
 
-        foreach ($rubro as $dataRR){
+        foreach ($rubro as $dataRR) {
+            if ($dataRR->sumarubroDecimal <= 0) {
+                continue;
+            }
 
-            if($dataRR->sumarubroDecimal > 0){
+            // Fila RUBRO
+            $filas[] = "<tr>
+            <td style='font-size:11px; text-align: center; font-weight: bold'>{$dataRR->codigo}</td>
+            <td style='font-size:11px; text-align: center; font-weight: bold'>{$dataRR->nombre}</td>
+            <td></td><td></td><td></td><td></td>
+            <td style='font-size:11px; text-align: center; font-weight: bold'>\${$dataRR->sumarubro}</td>
+        </tr>";
 
-                // Fila RUBRO
-                $tabla .= "<tr>
-                <td style='font-size:11px; text-align: center; font-weight: bold'>$dataRR->codigo</td>
-                <td style='font-size:11px; text-align: center; font-weight: bold'>$dataRR->nombre</td>
+            foreach ($dataRR->cuenta as $dataCC) {
+                if ($dataCC->sumaobjetoDecimal <= 0) {
+                    continue;
+                }
+
+                // Fila CUENTA
+                $filas[] = "<tr>
+                <td style='font-size:11px; text-align: center; font-weight: bold'>{$dataCC->codigo}</td>
+                <td style='font-size:11px; text-align: center; font-weight: bold'>{$dataCC->nombre}</td>
                 <td></td><td></td><td></td><td></td>
-                <td style='font-size:11px; text-align: center; font-weight: bold'>$$dataRR->sumarubro</td>
+                <td style='font-size:11px; text-align: center; font-weight: bold'>\${$dataCC->sumaobjetototal}</td>
             </tr>";
 
-                foreach ($dataRR->cuenta as $dataCC){
+                foreach ($dataCC->objeto as $dataObj) {
+                    if ($dataObj->sumaobjetoDeci <= 0) {
+                        continue;
+                    }
 
-                    if($dataCC->sumaobjetoDecimal > 0){
+                    // Fila OBJETO ESPECÍFICO
+                    $filas[] = "<tr>
+                    <td style='font-size:11px; text-align: center; font-weight: bold'>{$dataObj->codigo}</td>
+                    <td style='font-size:11px; text-align: center; font-weight: bold'>{$dataObj->nombre}</td>
+                    <td></td><td></td><td></td><td></td>
+                    <td style='font-size:11px; text-align: center; font-weight: bold'>\${$dataObj->sumaobjeto}</td>
+                </tr>";
 
-                        // Fila CUENTA
-                        $tabla .= "<tr>
-                        <td style='font-size:11px; text-align: center; font-weight: bold'>$dataCC->codigo</td>
-                        <td style='font-size:11px; text-align: center; font-weight: bold'>$dataCC->nombre</td>
-                        <td></td><td></td><td></td><td></td>
-                        <td style='font-size:11px; text-align: center; font-weight: bold'>$$dataCC->sumaobjetototal</td>
-                    </tr>";
-
-                        foreach ($dataCC->objeto as $dataObj){
-
-                            if($dataObj->sumaobjetoDeci > 0){
-
-                                // Fila OBJETO ESPECÍFICO
-                                $tabla .= "<tr>
-                                <td style='font-size:11px; text-align: center; font-weight: bold'>$dataObj->codigo</td>
-                                <td style='font-size:11px; text-align: center; font-weight: bold'>$dataObj->nombre</td>
-                                <td></td><td></td><td></td><td></td>
-                                <td style='font-size:11px; text-align: center; font-weight: bold'>$$dataObj->sumaobjeto</td>
-                            </tr>";
-
-                                // Filas MATERIALES
-                                foreach ($dataObj->material as $dataMM){
-
-                                    if($dataMM->cantidadpedi > 0){
-                                        $tabla .= "<tr>
-                                        <td style='font-size:11px; text-align: center; font-weight: normal'>$dataObj->codigo</td>
-                                        <td style='font-size:11px; text-align: center; font-weight: normal'>$dataMM->descripcion</td>
-                                        <td style='font-size:11px; text-align: center; font-weight: normal'>$dataMM->unimedida</td>
-                                        <td style='font-size:11px; text-align: center; font-weight: normal'>$dataMM->precunitario</td>
-                                        <td style='font-size:11px; text-align: center; font-weight: normal'>$dataMM->cantidadpedi</td>
-                                        <td style='font-size:11px; text-align: center; font-weight: normal'>$dataMM->nombreMes</td>
-                                        <td style='font-size:11px; text-align: center; font-weight: normal'>$dataMM->total</td>
-                                    </tr>";
-                                    }
-                                }
-
-                                // Filas PROYECTOS APROBADOS
-                                foreach ($listadoProyectoAprobados as $lpa){
-
-                                    if($dataObj->codigo == $lpa->codigoobj){
-                                        $tabla .= "<tr>
-                                        <td style='font-size:11px; text-align: center; font-weight: normal'>$dataObj->codigo</td>
-                                        <td style='font-size:11px; text-align: center; font-weight: normal'>$lpa->descripcion</td>
-                                        <td style='font-size:11px; text-align: center; font-weight: normal'>PROYECTO</td>
-                                        <td style='font-size:11px; text-align: center; font-weight: normal'></td>
-                                        <td style='font-size:11px; text-align: center; font-weight: normal'></td>
-                                        <td style='font-size:11px; text-align: center; font-weight: normal'>$lpa->nombreMes</td>
-                                        <td style='font-size:11px; text-align: center; font-weight: normal'>$lpa->costoFormat</td>
-                                    </tr>";
-                                    }
-                                }
-                            }
+                    // Filas MATERIALES
+                    foreach ($dataObj->material as $dataMM) {
+                        if (empty($dataMM->cantidadpedi) || $dataMM->cantidadpedi <= 0) {
+                            continue;
                         }
+
+                        $filas[] = "<tr>
+                        <td style='font-size:11px; text-align: center; font-weight: normal'>{$dataObj->codigo}</td>
+                        <td style='font-size:11px; text-align: center; font-weight: normal'>{$dataMM->descripcion}</td>
+                        <td style='font-size:11px; text-align: center; font-weight: normal'>{$dataMM->unimedida}</td>
+                        <td style='font-size:11px; text-align: center; font-weight: normal'>{$dataMM->precunitario}</td>
+                        <td style='font-size:11px; text-align: center; font-weight: normal'>{$dataMM->cantidadpedi}</td>
+                        <td style='font-size:11px; text-align: center; font-weight: normal'>{$dataMM->nombreMes}</td>
+                        <td style='font-size:11px; text-align: center; font-weight: normal'>{$dataMM->total}</td>
+                    </tr>";
+                    }
+
+                    // Filas PROYECTOS APROBADOS
+                    foreach ($dataObj->proyectos as $lpa) {
+                        $filas[] = "<tr>
+                        <td style='font-size:11px; text-align: center; font-weight: normal'>{$dataObj->codigo}</td>
+                        <td style='font-size:11px; text-align: center; font-weight: normal'>{$lpa->descripcion}</td>
+                        <td style='font-size:11px; text-align: center; font-weight: normal'>PROYECTO</td>
+                        <td style='font-size:11px; text-align: center; font-weight: normal'></td>
+                        <td style='font-size:11px; text-align: center; font-weight: normal'></td>
+                        <td style='font-size:11px; text-align: center; font-weight: normal'>{$lpa->nombreMes}</td>
+                        <td style='font-size:11px; text-align: center; font-weight: normal'>{$lpa->costoFormat}</td>
+                    </tr>";
                     }
                 }
             }
         }
 
-        $tabla .= "</tbody></table>";
+        $filas[] = "</tbody></table>";
 
-        $tabla .= "<table id='tablaFor' style='width: 100%; margin-top: 30px'>
+        $filas[] = "<table id='tablaFor' style='width: 100%; margin-top: 30px'>
         <tbody>
         <tr>
-            <th style='text-align: center; font-size:13px; font-weight: bold'>TOTAL UNIDAD: $$sumaGlobalUnidades</th>
+            <th style='text-align: center; font-size:13px; font-weight: bold'>TOTAL UNIDAD: \${$sumaGlobalUnidadesFmt}</th>
         </tr>
         </tbody>
     </table>";
+
+        // ── Segunda tabla: TOTALES POR CÓDIGO PRESUPUESTARIO ──────────────────
+        usort($resumenPorCodigo, function ($a, $b) {
+            return $a['codigo'] <=> $b['codigo'];
+        });
+
+        $filas[] = "<br><p class='fecha'><strong>TOTALES POR CÓDIGO PRESUPUESTARIO</strong></p>";
+
+        $filas[] = "<table id='tablaResumen' style='width: 60%; border-collapse: collapse;'>
+        <tbody>
+        <tr>
+            <th style='border:0.8px solid #000; text-align: center; font-size:13px; width: 50%; font-weight: bold; padding:4px 6px;'>CÓDIGO</th>
+            <th style='border:0.8px solid #000; text-align: center; font-size:13px; width: 50%; font-weight: bold; padding:4px 6px;'>TOTAL</th>
+        </tr>";
+
+        foreach ($resumenPorCodigo as $rc) {
+            $totalRcFmt = number_format((float)$rc['total'], 2, '.', ',');
+
+            $filas[] = "<tr>
+            <td style='border:0.8px solid #000; font-size:11px; text-align: center; font-weight: normal; padding:3px 6px;'>{$rc['codigo']}</td>
+            <td style='border:0.8px solid #000; font-size:11px; text-align: center; font-weight: normal; padding:3px 6px;'>\${$totalRcFmt}</td>
+        </tr>";
+        }
+
+        $filas[] = "<tr>
+        <td style='border:0.8px solid #000; font-size:11px; text-align: center; font-weight: bold; padding:3px 6px;'>TOTAL GENERAL</td>
+        <td style='border:0.8px solid #000; font-size:11px; text-align: center; font-weight: bold; padding:3px 6px;'>\${$sumaGlobalUnidadesFmt}</td>
+    </tr>";
+
+        $filas[] = "</tbody></table>";
+
+        $tabla .= implode('', $filas);
 
         $stylesheet = file_get_contents('css/csspdftotales.css');
         $mpdf->WriteHTML($stylesheet, 1);
@@ -1239,6 +1351,19 @@ class ReportesPresupuestoUnidadController extends Controller
         $mpdf->WriteHTML($tabla, 2);
         $mpdf->Output();
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
     /**
