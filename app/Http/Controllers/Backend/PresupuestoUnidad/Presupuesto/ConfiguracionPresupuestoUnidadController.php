@@ -698,6 +698,9 @@ class ConfiguracionPresupuestoUnidadController extends Controller
             ->orderBy('descripcion', 'ASC')
             ->get();
 
+        // Total de Proyectos Aprobados (antes de mutar el listado con los campos formateados)
+        $totalProyectosAprobados = $listadoProyectoAprobados->sum('costo');
+
         foreach ($listadoProyectoAprobados as $dd){
             $infoObjeto  = ObjEspecifico::where('id', $dd->id_objespeci)->first();
             $infoFuenteR = FuenteRecursos::where('id', $dd->id_fuenter)->first();
@@ -825,6 +828,9 @@ class ConfiguracionPresupuestoUnidadController extends Controller
             ->orderBy('descripcion', 'ASC')
             ->get();
 
+        // Total de Proyectos Pendientes
+        $totalProyectosPendientes = $listadoProyecto->sum('costo');
+
         foreach ($listadoProyecto as $lp){
             // <-- nombreMes para Tab 3
             if($lp->id_mes){
@@ -835,11 +841,19 @@ class ConfiguracionPresupuestoUnidadController extends Controller
             }
         }
 
+        // Total general de proyectos (pendientes + aprobados)
+        $totalProyectosGeneral    = number_format((float)($totalProyectosPendientes + $totalProyectosAprobados), 2, '.', ',');
+        $totalProyectosPendientes = number_format((float)$totalProyectosPendientes, 2, '.', ',');
+        $totalProyectosAprobados  = number_format((float)$totalProyectosAprobados, 2, '.', ',');
+
         return view('backend.admin.presupuestounidad.revisar.contenedorpresupuestoindividual', compact(
             'estado',
             'idpresupuesto',
             'idestado',
             'totalvalor',
+            'totalProyectosGeneral',
+            'totalProyectosPendientes',
+            'totalProyectosAprobados',
             'objeto',
             'listado',
             'preanio',

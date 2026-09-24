@@ -9,6 +9,8 @@
                     <form class="form-vertical">
                         <div style="margin-left: 20px">
                             <label style="color: darkgreen; font-size: 20px; font-family: arial">Total: ${{ $totalvalor }}</label>
+                            &nbsp;&nbsp;&nbsp;&nbsp;
+                            <label style="color: #a04000; font-size: 20px; font-family: arial">Total Proyectos: ${{ $totalProyectosGeneral }}</label>
                         </div>
 
                         <div class="col-12">
@@ -211,7 +213,11 @@
                                             {{-- Proyectos Pendientes --}}
                                             <form>
                                                 <div class="card-body">
-                                                    <h3>Proyectos Pendientesx</h3>
+                                                    <h3>Proyectos Pendientes
+                                                        <small style="color: #a04000; font-weight: bold; margin-left: 15px">
+                                                            Total: ${{ $totalProyectosPendientes }}
+                                                        </small>
+                                                    </h3>
                                                     <table class="table" id="matrizProyectosPendientes" style="border: 80px" data-toggle="table">
                                                         <thead>
                                                         <tr>
@@ -252,7 +258,11 @@
                                             <hr>
                                             <form>
                                                 <div class="card-body">
-                                                    <h3>Proyectos Aprobados</h3>
+                                                    <h3>Proyectos Aprobados
+                                                        <small style="color: #28a745; font-weight: bold; margin-left: 15px">
+                                                            Total: ${{ $totalProyectosAprobados }}
+                                                        </small>
+                                                    </h3>
                                                     <table class="table" id="matrizProyectosAprobados" style="border: 80px" data-toggle="table">
                                                         <thead>
                                                         <tr>
