@@ -60,6 +60,11 @@
                                             <img src="{{ asset('images/logopdf.png') }}" width="55px" height="55px">
                                             Mes Ejecutado
                                         </button>
+
+                                        <button type="button" onclick="generarPdfTotalMesEjecutadoExcel()" class="btn" style="margin-left: 25px; border-color: black; border-radius: 0.1px;">
+                                            <img src="{{ asset('images/logoexcel.png') }}" width="48px" height="55px">
+                                            Mes Ejecutado
+                                        </button>
                                     </div>
 
                                     <hr style="height: 0.5px; background-color: grey">
@@ -319,6 +324,12 @@
             var fecha = document.getElementById('select-anio').value;
             window.open("{{ URL::to('admin/p/generador/excel/totales') }}/" + fecha);
         }
+
+        function generarPdfTotalMesEjecutadoExcel(){
+            var fecha = document.getElementById('select-anio').value;
+            window.open("{{ URL::to('admin/p/generador/excel/totales/mesejecutado') }}/" + fecha);
+        }
+
 
         function generarPdfPorUnidad(){
 

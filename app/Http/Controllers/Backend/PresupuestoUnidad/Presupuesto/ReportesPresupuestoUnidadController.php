@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Backend\PresupuestoUnidad\Presupuesto;
 use App\Exports\ExportarConsolidadoExcel;
 use App\Exports\ExportarPorUnidadesExcel;
 use App\Exports\ExportarTotalesExcel;
+use App\Exports\ExportarTotalesMesEjecutadoExcel;
 use App\Exports\ExportarUnaUnidadExcel;
 use App\Http\Controllers\Controller;
 use App\Models\Cuenta;
@@ -2164,6 +2165,16 @@ class ReportesPresupuestoUnidadController extends Controller
 
 
 
+
+
+    // EXCEL
+
+// retorna Excel con los totales por mes de ejecución, se envía el ID año
+    public function generarTotalesExcelPresupuestoMesEjecutado($anio)
+    {
+        $nombre = 'totales_mes_ejecutado.xlsx';
+        return Excel::download(new ExportarTotalesMesEjecutadoExcel($anio), $nombre);
+    }
 
 
 
