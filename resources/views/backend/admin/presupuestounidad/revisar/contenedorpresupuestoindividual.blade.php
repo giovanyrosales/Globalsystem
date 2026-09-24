@@ -211,7 +211,7 @@
                                             {{-- Proyectos Pendientes --}}
                                             <form>
                                                 <div class="card-body">
-                                                    <h3>Proyectos Pendientes</h3>
+                                                    <h3>Proyectos Pendientesx</h3>
                                                     <table class="table" id="matrizProyectosPendientes" style="border: 80px" data-toggle="table">
                                                         <thead>
                                                         <tr>
