@@ -359,6 +359,9 @@ class ConfiguracionPresupuestoUnidadController extends Controller
             ->orderBy('descripcion', 'ASC')
             ->get();
 
+        // Total de Proyectos Aprobados (se calcula ANTES de mutar el listado con los campos formateados)
+        $totalProyectosAprobados = $listadoProyectoAprobados->sum('costo');
+
         foreach ($listadoProyectoAprobados as $dd){
             $infoObjeto  = ObjEspecifico::where('id', $dd->id_objespeci)->first();
             $infoFuenteR = ObjEspecifico::where('id', $dd->id_fuenter)->first();
@@ -487,6 +490,9 @@ class ConfiguracionPresupuestoUnidadController extends Controller
             ->orderBy('descripcion', 'ASC')
             ->get();
 
+        // Total de Proyectos Pendientes
+        $totalProyectosPendientes = $listadoProyecto->sum('costo');
+
         foreach ($listadoProyecto as $lp){
             if($lp->id_mes){
                 $infoMesP      = Meses::where('id', $lp->id_mes)->first();
@@ -496,12 +502,20 @@ class ConfiguracionPresupuestoUnidadController extends Controller
             }
         }
 
+        // Total general de proyectos (pendientes + aprobados), listo para mostrar
+        $totalProyectosGeneral = number_format((float)($totalProyectosPendientes + $totalProyectosAprobados), 2, '.', ',');
+        $totalProyectosPendientes = number_format((float)$totalProyectosPendientes, 2, '.', ',');
+        $totalProyectosAprobados  = number_format((float)$totalProyectosAprobados, 2, '.', ',');
+
         // Meses para selects
         $arrayMeses = Meses::orderBy('id', 'ASC')->get();
 
         return view('backend.admin.presupuestounidad.editar.contenedoreditarpresupuesto', compact(
             'estado',
             'totalvalor',
+            'totalProyectosGeneral',
+            'totalProyectosPendientes',
+            'totalProyectosAprobados',
             'listado',
             'idAnio',
             'idpresupuesto',
@@ -513,7 +527,6 @@ class ConfiguracionPresupuestoUnidadController extends Controller
             'arrayMeses'
         ));
     }
-
 
 
 
