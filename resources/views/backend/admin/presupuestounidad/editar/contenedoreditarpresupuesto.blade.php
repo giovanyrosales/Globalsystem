@@ -22,10 +22,20 @@
                             </div>
                         </div>
 
-                        <div style="margin-left: 20px">
+                        <div style="margin-left: 20px; margin-bottom: 10px;">
                             <label style="color: darkgreen; font-size: 20px; font-family: arial">Total: ${{ $totalvalor }}</label>
-                            &nbsp;&nbsp;&nbsp;&nbsp;
-                            <label style="color: #a04000; font-size: 20px; font-family: arial">Total Proyectos: ${{ $totalProyectosGeneral }}</label>
+                        </div>
+
+                        <div style="margin-left: 20px; margin-bottom: 15px;">
+                            <span style="color: #a04000; font-size: 20px; font-family: arial; font-weight: bold;">
+                                Total Proyectos: ${{ $totalProyectosGeneral }}
+                            </span>
+                                                    <span style="margin-left: 25px; font-size: 15px; color: #7d6608;">
+                                Pendientes: ${{ $totalProyectosPendientes }}
+                            </span>
+                                                    <span style="margin-left: 15px; font-size: 15px; color: #196f3d;">
+                                Aprobados: ${{ $totalProyectosAprobados }}
+                            </span>
                         </div>
 
                         <div class="col-12">
